@@ -7,7 +7,7 @@ import logging
 
 from sqlalchemy import inspect
 
-from modules.owner.routes import router
+from modules.owner.routes import router, auth_router
 from core.database import SessionLocal
 
 from core.config import DATABASE_URL
@@ -38,7 +38,7 @@ def root():
     })
 
 
-
+app.include_router(auth_router)
 app.include_router(router)
 
 

@@ -135,24 +135,43 @@ class HostelOut(HostelBase):
 # Room schemas
 class RoomBase(BaseSchema):
     room_number: str = Field(..., max_length=20)
-    room_type: Optional[str] = None
     no_of_beds: Optional[int] = None
     no_of_occupied_beds: Optional[int] = None
 
 class RoomCreate(RoomBase):
     hostel_id: int
+    room_type: Optional[str] = None  # Room type name for creation
 
 class RoomUpdate(BaseSchema):
     room_number: Optional[str] = Field(None, max_length=20)
-    room_type: Optional[str] = None
+    room_type: Optional[str] = None  # Room type name for updates
     no_of_beds: Optional[int] = None
     no_of_occupied_beds: Optional[int] = None
 
 class RoomOut(RoomBase):
     id: int
     hostel_id: int
+    room_type_name: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+
+class RoomTypeSchema(BaseModel):
+    id: int
+    name: str
+    description: Optional[str] = None
+
+    class Config:
+        from_attributes = True  
+
+
+class RoomTypeCreate(BaseModel):
+    name: str = Field(..., max_length=50)
+    description: Optional[str] = Field(None, max_length=200)
+
+
+class RoomTypeUpdate(BaseModel):
+    name: Optional[str] = Field(None, max_length=50)
+    description: Optional[str] = Field(None, max_length=200)  
 
 
 class TenantBase(BaseSchema):

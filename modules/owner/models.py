@@ -1,3 +1,4 @@
+from email.mime import base
 import uuid
 
 from sqlalchemy import UUID, Column, Integer, String, Boolean, DateTime, JSON, ForeignKey
@@ -64,9 +65,17 @@ class Hostel(Base):
 
 
     owner = relationship("Owner", back_populates="hostels")
-    rooms = relationship("Room", back_populates="hostel")
-    tenants = relationship("Tenant", back_populates="hostel")
+    rooms = relationship("Room", back_populates="hostel", cascade="all, delete-orphan")
+    tenants = relationship("Tenant", back_populates="hostel", cascade="all, delete-orphan")
 
+
+class RoomType(Base):
+    __tablename__ = "room_types"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(50), unique=True, nullable=False)
+    description = Column(String(200), nullable=True)
+    
 
 class Room(Base):
     __tablename__ = "rooms"
@@ -74,16 +83,16 @@ class Room(Base):
     id = Column(Integer, primary_key=True, index=True)
     hostel_id = Column(Integer, ForeignKey("hostels.id"), nullable=False)
     room_number = Column(String(20), nullable=False)
-    room_type = Column(String(50), nullable=True)  # e.g., Single, Double, Dormitory
+    room_type = Column(Integer, ForeignKey("room_types.id"), nullable=True)  # e.g., Single, Double, Dormitory
     no_of_beds = Column(Integer, nullable=True)
-    no_of_occupied_beds = Column(Integer, nullable=True)
+    no_of_occupied_beds = Column(Integer, nullable=True, default=0)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
 
     hostel = relationship("Hostel", back_populates="rooms")
-    tenants = relationship("Tenant", back_populates="room")
-
+    room_type_rel = relationship("RoomType", backref="rooms")
+    tenants = relationship("Tenant", back_populates="room", cascade="all, delete-orphan")
 
 
 
@@ -114,7 +123,7 @@ class Tenant(Base):
     zipcode = Column(String(20), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
-    payments = relationship("TenantPayment", back_populates="tenant")
+    payments = relationship("TenantPayment", back_populates="tenant", cascade="all, delete-orphan")
 
     hostel = relationship("Hostel", back_populates="tenants")
     room = relationship("Room", back_populates="tenants")

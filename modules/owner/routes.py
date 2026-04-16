@@ -2,17 +2,18 @@ from datetime import timedelta
 import logging
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, logger, status, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from requests import session
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from core.database import get_db
 from modules.owner import services
-from modules.owner.models import Owner, Hostel, Room, Tenant, TenantPayment
+from modules.owner.models import Owner, Hostel, Room, RoomType, Tenant, TenantPayment
 from modules.owner.schemas import (
     OTPRequest, OTPVerify, OTPResponse, LoginResponse,
     HostelCreate, HostelUpdate, HostelOut, OwnerCreate, OwnerUpdate, OwnerOut, OwnerdetailHostelRoomOut,
-    RoomCreate, RoomUpdate, RoomOut,
+    RoomCreate, RoomTypeSchema, RoomTypeCreate, RoomTypeUpdate, RoomUpdate, RoomOut,
     TenantCreate, TenantUpdate, TenantOut,
     TenantPaymentCreate, TenantPaymentUpdate, TenantPaymentOut
 )
@@ -22,6 +23,18 @@ from modules.owner.security import create_access_token, ACCESS_TOKEN_EXPIRE_MINU
 
 auth_router = APIRouter(prefix="/auth", tags=["Authentication"])
 router = APIRouter(prefix="/owner", tags=["Owner"])
+
+
+room_types = {  
+    "1": "Single Room",
+    "2": "2 Share Room",
+    "3": "3 Share Room",
+    "4": "4 Share Room",
+    "5": "5 Share Room",
+    "flat": "Flat",
+    "rental": "Rental",
+    "other": "Other"
+}
 
 logger = logging.getLogger(__name__)
 # Helper function for error handling
@@ -126,6 +139,51 @@ def logout():
 # Hostel Management Endpoints
 # ============================================================================
 
+@router.get("/room_types", response_model=List[RoomTypeSchema],tags=["Rooms"])
+def get_room_types(
+    db: Session = Depends(get_db)
+):
+    room_types = db.query(RoomType).all()
+    return room_types
+@router.post("/room_types", response_model=RoomTypeSchema, tags=["Rooms"])
+def create_room_type(
+    room_type: RoomTypeCreate,
+    db: Session = Depends(get_db)
+):
+    db_room_type = RoomType(**room_type.model_dump())
+    db.add(db_room_type)
+    db.commit()
+    db.refresh(db_room_type)
+    return db_room_type
+
+@router.patch("/room_types/{room_type_id}", response_model=RoomTypeSchema, tags=["Rooms"])
+def update_room_type(
+    room_type_id: int,
+    room_type_update: RoomTypeUpdate,
+    db: Session = Depends(get_db)
+):
+    room_type = db.query(RoomType).filter(RoomType.id == room_type_id).first()
+    if not room_type:
+        raise HTTPException(status_code=404, detail="Room type not found")
+    update_data = room_type_update.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(room_type, field, value)
+    db.commit()
+    db.refresh(room_type)
+    return room_type
+
+@router.delete("/room_types/{room_type_id}", tags=["Rooms"])
+def delete_room_type(
+    room_type_id: int,
+    db: Session = Depends(get_db)
+):
+    room_type = db.query(RoomType).filter(RoomType.id == room_type_id).first()
+    if not room_type:
+        raise HTTPException(status_code=404, detail="Room type not found")
+    db.delete(room_type)
+    db.commit()
+    return {"message": "Room type deleted successfully"}
+
 
 @router.post("/register", response_model=OwnerOut, tags=["Owner"])
 def register_owner(
@@ -187,6 +245,13 @@ def get_hostels(
 ):
     """Get all hostels for the current owner"""
     hostels = db.query(Hostel).filter(Hostel.owner_id == current_owner["id"]).all()
+    
+    # Populate room_type_name for each room
+    for hostel in hostels:
+        for room in hostel.rooms:
+            if room.room_type_rel:
+                room.room_type_name = room.room_type_rel.name
+    
     return hostels
 
 
@@ -239,6 +304,28 @@ def update_hostel(
     return hostel
 
 
+@router.patch("/hostels/{hostel_id}", response_model=HostelOut, tags=["Hostels"])
+def partial_update_hostel(
+    hostel_id: int,
+    hostel_update: HostelUpdate,
+    current_owner: dict = Depends(get_current_owner),
+    db: Session = Depends(get_db)
+):
+    """Partially update a hostel"""
+    hostel = db.query(Hostel).filter(
+        Hostel.id == hostel_id,
+        Hostel.owner_id == current_owner["id"]
+    ).first()
+    if not hostel:
+        raise HTTPException(status_code=404, detail="Hostel not found")
+    update_data = hostel_update.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(hostel, field, value)
+    db.commit()
+    db.refresh(hostel)
+    return hostel
+
+
 @router.delete("/hostels/{hostel_id}", tags=["Hostels"])
 def delete_hostel(
     hostel_id: int,
@@ -276,6 +363,12 @@ def get_rooms(
     if not hostel:
         raise HTTPException(status_code=404, detail="Hostel not found")
     rooms = db.query(Room).filter(Room.hostel_id == hostel_id).all()
+    
+    # Populate room_type_name for each room
+    for room in rooms:
+        if room.room_type_rel:
+            room.room_type_name = room.room_type_rel.name
+    
     return rooms
 
 
@@ -296,10 +389,29 @@ def create_room(
         raise HTTPException(status_code=404, detail="Hostel not found")
     if room.hostel_id != hostel_id:
         raise HTTPException(status_code=400, detail="Hostel ID mismatch")
-    db_room = Room(**room.model_dump())
+    
+    # Convert room type name to ID if provided
+    room_type_id = None
+    if room.room_type:
+        room_type_obj = db.query(RoomType).filter(RoomType.name == room.room_type).first()
+        if not room_type_obj:
+            raise HTTPException(status_code=400, detail=f"Room type '{room.room_type}' not found")
+        room_type_id = room_type_obj.id
+    
+    # Create room data without room_type field, then add the ID
+    room_data = room.model_dump()
+    room_data.pop('room_type', None)  # Remove the string room_type
+    room_data['room_type'] = room_type_id  # Add the integer room_type_id
+    
+    db_room = Room(**room_data)
     db.add(db_room)
     db.commit()
     db.refresh(db_room)
+    
+    # Populate room_type_name for response
+    if db_room.room_type_rel:
+        db_room.room_type_name = db_room.room_type_rel.name
+    
     return db_room
 
 
@@ -316,6 +428,11 @@ def get_room(
     ).first()
     if not room:
         raise HTTPException(status_code=404, detail="Room not found")
+    
+    # Populate room_type_name
+    if room.room_type_rel:
+        room.room_type_name = room.room_type_rel.name
+    
     return room
 
 
@@ -333,11 +450,27 @@ def update_room(
     ).first()
     if not room:
         raise HTTPException(status_code=404, detail="Room not found")
+    
     update_data = room_update.model_dump(exclude_unset=True)
+    
+    # Handle room_type conversion if provided
+    if 'room_type' in update_data:
+        room_type_name = update_data.pop('room_type')  # Remove the string
+        if room_type_name:
+            room_type_obj = db.query(RoomType).filter(RoomType.name == room_type_name).first()
+            if not room_type_obj:
+                raise HTTPException(status_code=400, detail=f"Room type '{room_type_name}' not found")
+            update_data['room_type'] = room_type_obj.id  # Add the integer ID
+    
     for field, value in update_data.items():
         setattr(room, field, value)
     db.commit()
     db.refresh(room)
+    
+    # Populate room_type_name for response
+    if room.room_type_rel:
+        room.room_type_name = room.room_type_rel.name
+    
     return room
 
 
@@ -595,9 +728,58 @@ def delete_payment(
     db.commit()
     return {"message": "Payment deleted successfully"}
 
+@router.get("/dashboard", tags=["Dashboard"])
+def get_dashboard_data(
+    hostel_id: int | None = None,
+    current_owner: dict = Depends(get_current_owner),
+    db: Session = Depends(get_db),
+):
+    """Get dashboard data for the owner"""
+
+    if hostel_id:
+        hostel = db.query(Hostel).filter(
+            Hostel.id == hostel_id,
+            Hostel.owner_id == current_owner["id"]
+        ).first()
+
+        if not hostel:
+            raise HTTPException(status_code=404, detail="Hostel not found")
+
+        room_filter = Room.hostel_id == hostel_id
+        tenant_filter = Tenant.hostel_id == hostel_id
+
+    else:
+        # 🔥 IMPORTANT: filter by owner (you missed this earlier)
+        hostel_ids = db.query(Hostel.id).filter(
+            Hostel.owner_id == current_owner["id"]
+        )
+
+        room_filter = Room.hostel_id.in_(hostel_ids)
+        tenant_filter = Tenant.hostel_id.in_(hostel_ids)
+
+    rooms_count = db.query(Room).filter(room_filter).count() or 0
+    bed_count = db.query(func.sum(Room.no_of_beds)).filter(room_filter).scalar() or 0
+    tenants_count = db.query(Tenant).filter(tenant_filter).count() or 0
+    total_amount = db.query(func.sum(Tenant.rent)).filter(tenant_filter).scalar() or 0
+    total_payments = db.query(func.sum(TenantPayment.amount))\
+        .join(Tenant)\
+        .filter(tenant_filter)\
+        .scalar() or 0
+
+    payment_due = total_amount - total_payments
+
+    return {
+        "rooms_count": rooms_count,
+        "bed_count": bed_count,
+        "tenants_count": tenants_count,
+        "vacant_beds": bed_count - tenants_count,
+        "total_amount": total_amount,
+        "total_payments": total_payments,
+        "payment_due": payment_due
+    }
 
 # Include auth router
-router.include_router(auth_router)
+# router.include_router(auth_router)
 
 
 

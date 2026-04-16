@@ -11,7 +11,7 @@ import random
 sys.path.insert(0, '/home/raman/hostelapp/HostelOps_backend/backend')
 
 from core.database import SessionLocal, engine, Base
-from modules.owner.models import Owner, Hostel, Room, Tenant, TenantPayment
+from modules.owner.models import Owner, Hostel, Room, Tenant, TenantPayment, RoomType
 
 
 def seed_owners(db: Session):
@@ -217,27 +217,69 @@ def seed_hostels(db: Session):
     return hostels
 
 
+def seed_room_types(db: Session):
+    """Create demo room type records"""
+    room_types_data = [
+        {
+            "name": "Single",
+            "description": "Room with one bed for individual occupancy",
+        },
+        {
+            "name": "Double",
+            "description": "Room with two beds for shared occupancy",
+        },
+        {
+            "name": "Triple",
+            "description": "Room with three beds for shared occupancy",
+        },
+        {
+            "name": "Dormitory",
+            "description": "Large room with multiple beds for budget travelers",
+        },
+        {
+            "name": "Family",
+            "description": "Room suitable for families with multiple beds",
+        },
+    ]
+    
+    room_types = []
+    for data in room_types_data:
+        # Check if room type already exists
+        existing = db.query(RoomType).filter(RoomType.name == data["name"]).first()
+        if not existing:
+            room_type = RoomType(**data)
+            db.add(room_type)
+            room_types.append(room_type)
+    
+    db.commit()
+    print(f"✓ Created {len(room_types)} demo room type records")
+    return room_types
+
+
 def seed_rooms(db: Session):
     """Create 5 demo room records linked to hostels"""
     hostels = db.query(Hostel).all()
+    room_types = db.query(RoomType).all()
     if not hostels:
         print("No hostels found. Please seed hostels first.")
         return []
+    if not room_types:
+        print("No room types found. Please seed room types first.")
+        return []
     
-    room_types = ["Single", "Double", "Triple", "Dormitory", "Family"]
     beds_count = [1, 2, 3, 6, 4]
     
     rooms = []
     for idx, hostel in enumerate(hostels):
         for room_num in range(1, 6):  # 5 rooms per hostel
-            room_type = room_types[room_num - 1]
+            room_type_id = room_types[room_num - 1].id
             no_of_beds = beds_count[room_num - 1]
             no_of_occupied = random.randint(0, no_of_beds)
             
             room_data = {
                 "hostel_id": hostel.id,
                 "room_number": f"{hostel.id}0{room_num}",
-                "room_type": room_type,
+                "room_type": room_type_id,
                 "no_of_beds": no_of_beds,
                 "no_of_occupied_beds": no_of_occupied,
             }
@@ -376,6 +418,7 @@ def main():
         # Seed data
         seed_owners(db)
         seed_hostels(db)
+        seed_room_types(db)
         seed_rooms(db)
         seed_tenants(db)
         seed_payments(db)
@@ -384,6 +427,7 @@ def main():
         print("\nDemo Data Summary:")
         print(f"  • Owners: 5")
         print(f"  • Hostels: 5")
+        print(f"  • Room Types: 5")
         print(f"  • Rooms: 25 (5 per hostel)")
         print(f"  • Tenants: ~10 (based on room availability)")
         print(f"  • Payments: ~30-60 (3-6 per tenant)")
