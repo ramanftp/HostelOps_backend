@@ -370,3 +370,88 @@ def create_hostel(db: Session, hostel_data: Dict[str, Any], owner_id: int) -> No
     db.commit()
     db.refresh(new_hostel)
     return new_hostel
+
+
+# ============================================================================
+# Aadhaar OCR Functions
+# ============================================================================
+
+def extract_text_from_image(image_path: str) -> str:
+    """Extract text from image using Google Cloud Vision API"""
+    import os
+    from google.cloud import vision
+    
+    # Set Google Cloud credentials if provided
+    if settings.GOOGLE_CLOUD_CREDENTIALS_PATH:
+        credentials_path = settings.GOOGLE_CLOUD_CREDENTIALS_PATH.strip()
+        if not os.path.isfile(credentials_path):
+            raise FileNotFoundError(f"Google Cloud credentials file not found: {credentials_path}")
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_path
+    
+    client = vision.ImageAnnotatorClient()
+
+    with open(image_path, "rb") as f:
+        content = f.read()
+
+    image = vision.Image(content=content)
+    response = client.text_detection(image=image)
+    
+
+    return response.text_annotations[0].description if response.text_annotations else ""
+
+
+def parse_aadhaar_text(text: str) -> Dict[str, str]:
+    """Parse Aadhaar card text to extract relevant information"""
+    lines = [i.strip() for i in text.split("\n") if i.strip()]
+
+    data = {
+        "name": "",
+        "aadhaar_no": "",
+        "dob": "",
+        "gender": "",
+        "address": ""
+    }
+
+    # Aadhar Number
+    for line in lines:
+        if re.search(r'\d{4}\s\d{4}\s\d{4}', line):
+            data["aadhaar_no"] = line.replace(" ", "")
+
+    # DOB
+    for line in lines:
+        dob = re.findall(r'\d{2}/\d{2}/\d{4}', line)
+        if dob:
+            data["dob"] = dob[0]
+
+    # Gender
+    for line in lines:
+        if re.search(r'Male', line, re.I):
+            data["gender"] = "MALE"
+        elif re.search(r'Female', line, re.I):
+            data["gender"] = "FEMALE"
+
+    # Name (usually before DOB)
+    for i, line in enumerate(lines):
+        if data["dob"] in line:
+            data["name"] = lines[i-1]
+
+    # Address (after keyword)
+    address_started = False
+    address_lines = []
+
+    for line in lines:
+        if "Address" in line:
+            address_started = True
+            continue
+        if address_started:
+            address_lines.append(line)
+
+    data["address"] = " ".join(address_lines)
+
+    return data
+
+
+def process_aadhaar_image(image_path: str) -> Dict[str, str]:
+    """Process Aadhaar image and extract data"""
+    text = extract_text_from_image(image_path)
+    return parse_aadhaar_text(text)

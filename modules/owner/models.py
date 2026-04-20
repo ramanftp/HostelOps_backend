@@ -127,6 +127,7 @@ class Tenant(Base):
 
     hostel = relationship("Hostel", back_populates="tenants")
     room = relationship("Room", back_populates="tenants")
+    payment_schedules = relationship("PaymentSchedule", back_populates="tenant", cascade="all, delete-orphan")
     
 
 
@@ -143,3 +144,21 @@ class TenantPayment(Base):
     transaction_id = Column(String(100), unique=True, nullable=True)
 
     tenant = relationship("Tenant", back_populates="payments")
+
+
+class PaymentSchedule(Base):
+    __tablename__ = "payment_schedules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False)
+    amount = Column(Integer, nullable=False)
+    frequency = Column(String(20), nullable=False)  # monthly, weekly, bi-weekly, custom
+    payment_day = Column(Integer, nullable=True)  # Day of month (1-31) for monthly, day of week (0-6) for weekly
+    start_date = Column(DateTime(timezone=True), nullable=False)
+    end_date = Column(DateTime(timezone=True), nullable=True)
+    status = Column(String(20), default="active", nullable=False)  # active, paused, cancelled
+    notes = Column(String(500), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
+
+    tenant = relationship("Tenant", back_populates="payment_schedules")

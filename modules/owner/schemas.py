@@ -155,6 +155,9 @@ class RoomOut(RoomBase):
     created_at: datetime
     updated_at: datetime
 
+class RoomHostelImgOut(RoomOut):
+    hostel_photos_urls: Optional[List[str]] = None
+
 class RoomTypeSchema(BaseModel):
     id: int
     name: str
@@ -228,7 +231,7 @@ class TenantUpdate(BaseSchema):
 class TenantOut(TenantBase):
     id: int
     hostel_id: Optional[int] = None
-    room_id: Optional[int] = None
+    room: Optional[RoomOut] = None
     created_at: datetime
     updated_at: datetime
 
@@ -254,3 +257,13 @@ class TenantPaymentOut(TenantPaymentBase):
     id: int
     tenant_id: int
     payment_date: datetime
+
+
+# Aadhaar OCR schemas
+class AadhaarData(BaseModel):
+    name: str
+    aadhaar_no: str
+    dob: str
+    gender: str
+    address: str
+    image_path: Optional[str] = None
