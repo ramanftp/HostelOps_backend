@@ -34,6 +34,7 @@ class Owner(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
 
     hostels = relationship("Hostel", back_populates="owner")
+    expenses = relationship("Expense", back_populates="owner", cascade="all, delete-orphan")
 
 
 
@@ -67,6 +68,9 @@ class Hostel(Base):
     owner = relationship("Owner", back_populates="hostels")
     rooms = relationship("Room", back_populates="hostel", cascade="all, delete-orphan")
     tenants = relationship("Tenant", back_populates="hostel", cascade="all, delete-orphan")
+    bills = relationship("Bill", back_populates="hostel", cascade="all, delete-orphan")
+    transactions = relationship("Transaction", back_populates="hostel", cascade="all, delete-orphan")
+    expenses = relationship("Expense", back_populates="hostel", cascade="all, delete-orphan")
 
 
 class RoomType(Base):
@@ -123,42 +127,12 @@ class Tenant(Base):
     zipcode = Column(String(20), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
-    payments = relationship("TenantPayment", back_populates="tenant", cascade="all, delete-orphan")
 
     hostel = relationship("Hostel", back_populates="tenants")
     room = relationship("Room", back_populates="tenants")
-    payment_schedules = relationship("PaymentSchedule", back_populates="tenant", cascade="all, delete-orphan")
+    bills = relationship("Bill", back_populates="tenant", cascade="all, delete-orphan")
+    transactions = relationship("Transaction", back_populates="tenant", cascade="all, delete-orphan")
     
 
 
 
-
-class TenantPayment(Base):
-    __tablename__ = "tenant_payments"
-
-    id = Column(Integer, primary_key=True, index=True)
-    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False)
-    amount = Column(Integer, nullable=False)
-    payment_date = Column(DateTime(timezone=True), server_default=func.now())
-    payment_method = Column(String(50), nullable=True)  # e.g., Cash, UPI, Bank Transfer
-    transaction_id = Column(String(100), unique=True, nullable=True)
-
-    tenant = relationship("Tenant", back_populates="payments")
-
-
-class PaymentSchedule(Base):
-    __tablename__ = "payment_schedules"
-
-    id = Column(Integer, primary_key=True, index=True)
-    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False)
-    amount = Column(Integer, nullable=False)
-    frequency = Column(String(20), nullable=False)  # monthly, weekly, bi-weekly, custom
-    payment_day = Column(Integer, nullable=True)  # Day of month (1-31) for monthly, day of week (0-6) for weekly
-    start_date = Column(DateTime(timezone=True), nullable=False)
-    end_date = Column(DateTime(timezone=True), nullable=True)
-    status = Column(String(20), default="active", nullable=False)  # active, paused, cancelled
-    notes = Column(String(500), nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
-
-    tenant = relationship("Tenant", back_populates="payment_schedules")

@@ -95,9 +95,9 @@ def get_owner_by_id(db: Session, owner_id: int) -> Optional[Owner]:
 
 def get_owner_by_phone(db: Session, phone_number: str) -> Optional[Owner]:
     """Get owner by phone number"""
-    # normalized = normalize_phone(phone_number)
-    owner =  db.execute(
-        select(Owner).where(Owner.phone_number == phone_number)
+    normalized_phone = normalize_phone(phone_number)
+    owner = db.execute(
+        select(Owner).where(Owner.phone_number == normalized_phone)
     ).scalar_one_or_none()
     return owner
 
@@ -159,7 +159,7 @@ def send_otp(phone_number: str, purpose: str = "login", expire_minutes: int = 5)
         
         # Log OTP for development
         logger.info(f"📱 OTP for {normalized_phone}: {otp}")
-        print(f"📱 OTP for {phone_number}: {otp} (expires in {expire_minutes} minutes)")
+        print(f"📱 OTP for {normalized_phone}: {otp} (expires in {expire_minutes} minutes)")
         
         # Try to send via MSG91 if configured
         sms_sent = False 
@@ -169,22 +169,21 @@ def send_otp(phone_number: str, purpose: str = "login", expire_minutes: int = 5)
                 logger.info(f"SMS sent via MSG91 to {normalized_phone}")
         else:
             logger.warning("MSG91 not configured - OTP will not be sent via SMS")
-        # 
+        
         # Store OTP for verification
         ttl = expire_minutes * 60
-        sms_sent = True
 
         # Store OTP in Redis with TTL
         redis_client.setex(
-            _otp_key(phone_number),
+            _otp_key(normalized_phone),
             ttl,
-            json.dumps( {
-            "otp": otp,
-            "expires_at": expires_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "purpose": purpose,
-            "attempts": 0,
-            "sms_sent": sms_sent
-        })
+            json.dumps({
+                "otp": otp,
+                "expires_at": expires_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "purpose": purpose,
+                "attempts": 0,
+                "sms_sent": sms_sent
+            })
         )
         
         # Prepare response
@@ -216,7 +215,7 @@ def verify_otp(phone_number: str, otp: str, purpose: str = "login") -> bool:
     try:
         normalized_phone = normalize_phone(phone_number)
 
-        key = _otp_key(phone_number)
+        key = _otp_key(normalized_phone)
 
         stored = redis_client.get(key)
 
@@ -315,24 +314,23 @@ def authenticate_with_otp(
     Returns user and flag indicating if user is new
     """
     try:
-        user = get_owner_by_phone(db, phone_number)
+        normalized_phone = normalize_phone(phone_number)
+        user = get_owner_by_phone(db, normalized_phone)
         if not user:
-            raise InvalidOTPError("User not found")
+            raise UserNotFoundError("Owner not found")
         
         # Verify OTP for all users including admin
-        verify_otp(phone_number, otp, "login")
-        
-        normalized_phone = normalize_phone(phone_number)
-        
-        # Find or create user
+        verify_otp(normalized_phone, otp, "login")
 
-        
         # Update login info
-     
-        
-        db.flush()
+        user.last_login_at = datetime.utcnow()
+        if ip_address:
+            user.last_login_ip = ip_address
+        user.status = getattr(user, "status", user.status if hasattr(user, "status") else "active")
 
-        
+        db.commit()
+        db.refresh(user)
+
         return {
             "user": user
         }
@@ -400,6 +398,27 @@ def extract_text_from_image(image_path: str) -> str:
     return response.text_annotations[0].description if response.text_annotations else ""
 
 
+def extract_text_from_image_bytes(image_bytes: bytes) -> str:
+    """Extract text from image bytes using Google Cloud Vision API"""
+    import os
+    from google.cloud import vision
+    
+    # Set Google Cloud credentials if provided
+    if settings.GOOGLE_CLOUD_CREDENTIALS_PATH:
+        credentials_path = settings.GOOGLE_CLOUD_CREDENTIALS_PATH.strip()
+        if not os.path.isfile(credentials_path):
+            raise FileNotFoundError(f"Google Cloud credentials file not found: {credentials_path}")
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_path
+    
+    client = vision.ImageAnnotatorClient()
+
+    image = vision.Image(content=image_bytes)
+    response = client.text_detection(image=image)
+    
+
+    return response.text_annotations[0].description if response.text_annotations else ""
+
+
 def parse_aadhaar_text(text: str) -> Dict[str, str]:
     """Parse Aadhaar card text to extract relevant information"""
     lines = [i.strip() for i in text.split("\n") if i.strip()]
@@ -454,4 +473,10 @@ def parse_aadhaar_text(text: str) -> Dict[str, str]:
 def process_aadhaar_image(image_path: str) -> Dict[str, str]:
     """Process Aadhaar image and extract data"""
     text = extract_text_from_image(image_path)
+    return parse_aadhaar_text(text)
+
+
+def process_aadhaar_image_bytes(image_bytes: bytes) -> Dict[str, str]:
+    """Process Aadhaar image bytes and extract data"""
+    text = extract_text_from_image_bytes(image_bytes)
     return parse_aadhaar_text(text)

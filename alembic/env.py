@@ -20,6 +20,8 @@ if config.config_file_name is not None:
 # target_metadata = mymodel.Base.metadata
 from core.database import Base
 from modules.owner import models
+from modules.bill_payment import models as bill_models
+from modules.expenses import models as expense_models
 target_metadata = Base.metadata
 
 # other values from the config, defined by the needs of env.py,

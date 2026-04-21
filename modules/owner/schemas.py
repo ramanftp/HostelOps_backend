@@ -236,29 +236,6 @@ class TenantOut(TenantBase):
     updated_at: datetime
 
 
-# Tenant Payment schemas
-class TenantPaymentBase(BaseSchema):
-    amount: int = Field(..., gt=0)
-    payment_method: Optional[str] = None
-    transaction_id: Optional[str] = None
-
-
-class TenantPaymentCreate(TenantPaymentBase):
-    tenant_id: int
-
-
-class TenantPaymentUpdate(BaseSchema):
-    amount: Optional[int] = Field(None, gt=0)
-    payment_method: Optional[str] = None
-    transaction_id: Optional[str] = None
-
-
-class TenantPaymentOut(TenantPaymentBase):
-    id: int
-    tenant_id: int
-    payment_date: datetime
-
-
 # Aadhaar OCR schemas
 class AadhaarData(BaseModel):
     name: str

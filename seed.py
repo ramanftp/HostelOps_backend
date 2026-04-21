@@ -1,6 +1,6 @@
 """
 Demo data seeding script for HostelOps backend
-Generates sample records for all models: Owner, Hostel, Room, Tenant, TenantPayment
+Generates sample records for all models: Owner, Hostel, Room, Tenant
 """
 import sys
 from sqlalchemy.orm import Session
@@ -11,7 +11,7 @@ import random
 sys.path.insert(0, '/home/raman/hostelapp/HostelOps_backend/backend')
 
 from core.database import SessionLocal, engine, Base
-from modules.owner.models import Owner, Hostel, Room, Tenant, TenantPayment, RoomType
+from modules.owner.models import Owner, Hostel, Room, Tenant, RoomType
 
 
 def seed_owners(db: Session):
@@ -370,44 +370,6 @@ def seed_tenants(db: Session):
     return tenants
 
 
-def seed_payments(db: Session):
-    """Create demo payment records for tenants"""
-    tenants = db.query(Tenant).all()
-    if not tenants:
-        print("No tenants found. Please seed tenants first.")
-        return []
-    
-    payments = []
-    payment_methods = ["Cash", "UPI", "Bank Transfer", "Credit Card"]
-    
-    for tenant in tenants:
-        # Create 3-6 payments per tenant
-        num_payments = random.randint(3, 6)
-        for i in range(num_payments):
-            payment_date = datetime.now() - timedelta(days=random.randint(0, 365))
-            
-            payment_data = {
-                "tenant_id": tenant.id,
-                "amount": tenant.rent,
-                "payment_date": payment_date,
-                "payment_method": random.choice(payment_methods),
-                "transaction_id": f"TXN{tenant.id}{i+1:03d}",
-            }
-            
-            # Check if payment already exists
-            existing = db.query(TenantPayment).filter(
-                TenantPayment.tenant_id == tenant.id,
-                TenantPayment.transaction_id == payment_data["transaction_id"]
-            ).first()
-            if not existing:
-                payment = TenantPayment(**payment_data)
-                db.add(payment)
-                payments.append(payment)
-    
-    db.commit()
-    print(f"✓ Created {len(payments)} demo payment records")
-    return payments
-
 
 def main():
     """Main seeding function"""
@@ -421,7 +383,6 @@ def main():
         seed_room_types(db)
         seed_rooms(db)
         seed_tenants(db)
-        seed_payments(db)
         
         print("\n✅ Database seeding completed successfully!")
         print("\nDemo Data Summary:")
@@ -430,7 +391,6 @@ def main():
         print(f"  • Room Types: 5")
         print(f"  • Rooms: 25 (5 per hostel)")
         print(f"  • Tenants: ~10 (based on room availability)")
-        print(f"  • Payments: ~30-60 (3-6 per tenant)")
         
     except Exception as e:
         print(f"\n❌ Error during seeding: {str(e)}")

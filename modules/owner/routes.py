@@ -1,9 +1,5 @@
 from datetime import datetime, timedelta
 import logging
-import os
-import re
-import shutil
-import uuid
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request, UploadFile, File
@@ -15,13 +11,12 @@ from sqlalchemy.orm import Session
 from core.config import settings
 from core.database import get_db
 from modules.owner import services
-from modules.owner.models import Owner, Hostel, Room, RoomType, Tenant, TenantPayment
+from modules.owner.models import Owner, Hostel, Room, RoomType, Tenant
 from modules.owner.schemas import (
     OTPRequest, OTPVerify, OTPResponse, LoginResponse,
     HostelCreate, HostelUpdate, HostelOut, OwnerCreate, OwnerUpdate, OwnerOut, OwnerdetailHostelRoomOut,
     RoomCreate, RoomHostelImgOut, RoomTypeSchema, RoomTypeCreate, RoomTypeUpdate, RoomUpdate, RoomOut,
-    TenantCreate, TenantUpdate, TenantOut,
-    TenantPaymentCreate, TenantPaymentUpdate, TenantPaymentOut, AadhaarData
+    TenantCreate, TenantUpdate, TenantOut, AadhaarData
 )
 from modules.owner.security import create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES, get_current_owner
 
@@ -113,7 +108,7 @@ def verify_otp_and_login(
         )
         
         owner = auth_result["user"]
-        print
+        
         # Create access token
         access_token = create_access_token(
             subject=owner.phone_number,
@@ -131,6 +126,8 @@ def verify_otp_and_login(
         
     except services.InvalidOTPError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except services.UserNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except services.AccountLockedError as e:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
 
@@ -567,27 +564,14 @@ def extract_aadhaar_data(
     if not back.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="Back must be an image")
 
-    upload_dir = settings.aadhaar_image_dir
-    os.makedirs(upload_dir, exist_ok=True)
-
-    # Generate filenames
-    def save_file(file: UploadFile):
-        safe_name = re.sub(r"[^a-zA-Z0-9_.-]", "_", file.filename)
-        filename = f"_aadhaar_{uuid.uuid4().hex}_{safe_name}"
-        path = os.path.join(upload_dir, filename)
-
-        with open(path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-
-        return path, filename
-
-    front_path, front_name = save_file(front)
-    back_path, back_name = save_file(back)
-
     try:
-        # Process images
-        front_data = services.process_aadhaar_image(front_path)
-        back_data = services.process_aadhaar_image(back_path)
+        # Read file contents
+        front_content = front.file.read()
+        back_content = back.file.read()
+
+        # Process images directly from bytes
+        front_data = services.process_aadhaar_image_bytes(front_content)
+        back_data = services.process_aadhaar_image_bytes(back_content)
 
         # Merge data safely (front priority)
         final_data = {
@@ -599,10 +583,7 @@ def extract_aadhaar_data(
         }
 
         # Single clean return
-        return AadhaarData(
-            **final_data,
-            image_path=f"{settings.aadhaar_image_url}/{front_name}"
-        )
+        return AadhaarData(**final_data)
 
     except Exception as e:
         logger.error(f"Aadhaar processing error: {e}")
@@ -688,183 +669,6 @@ def delete_tenant(
     db.commit()
     return {"message": "Tenant deleted successfully"}
 
-
-# ============================================================================
-# Tenant Payment Management Endpoints
-# ============================================================================
-
-@router.get("/tenants/{tenant_id}/payments", response_model=List[TenantPaymentOut], tags=["Payments"])
-def get_tenant_payments(
-    tenant_id: int,
-    current_owner: dict = Depends(get_current_owner),
-    db: Session = Depends(get_db)
-):
-    """Get all payments for a tenant"""
-    tenant = db.query(Tenant).join(Hostel).filter(
-        Tenant.id == tenant_id,
-        Hostel.owner_id == current_owner["id"]
-    ).first()
-    if not tenant:
-        raise HTTPException(status_code=404, detail="Tenant not found")
-    payments = db.query(TenantPayment).filter(TenantPayment.tenant_id == tenant_id).all()
-    return payments
-
-
-@router.post("/tenants/{tenant_id}/payments", response_model=TenantPaymentOut, tags=["Payments"])
-def create_tenant_payment(
-    tenant_id: int,
-    payment: TenantPaymentCreate,
-    current_owner: dict = Depends(get_current_owner),
-    db: Session = Depends(get_db)
-):
-    """Create a payment for a tenant"""
-    tenant = db.query(Tenant).join(Hostel).filter(
-        Tenant.id == tenant_id,
-        Hostel.owner_id == current_owner["id"]
-    ).first()
-    if not tenant:
-        raise HTTPException(status_code=404, detail="Tenant not found")
-    if payment.tenant_id != tenant_id:
-        raise HTTPException(status_code=400, detail="Tenant ID mismatch")
-    
-    db_payment = TenantPayment(**payment.model_dump())
-    db.add(db_payment)
-    db.commit()
-    db.refresh(db_payment)
-    return db_payment
-
-
-@router.get("/payments/{payment_id}", response_model=TenantPaymentOut, tags=["Payments"])
-def get_payment(
-    payment_id: int,
-    current_owner: dict = Depends(get_current_owner),
-    db: Session = Depends(get_db)
-):
-    """Get a specific payment"""
-    payment = db.query(TenantPayment).join(Tenant).join(Hostel).filter(
-        TenantPayment.id == payment_id,
-        Hostel.owner_id == current_owner["id"]
-    ).first()
-    if not payment:
-        raise HTTPException(status_code=404, detail="Payment not found")
-    return payment
-
-
-@router.get("/payments/{payment_id}/slip", response_class=HTMLResponse, tags=["Payments"])
-def get_payment_slip(
-    payment_id: int,
-    current_owner: dict = Depends(get_current_owner),
-    db: Session = Depends(get_db)
-):
-    """Return a printable payment slip HTML page"""
-    payment = db.query(TenantPayment).join(Tenant).join(Hostel).filter(
-        TenantPayment.id == payment_id,
-        Hostel.owner_id == current_owner["id"]
-    ).first()
-    if not payment:
-        raise HTTPException(status_code=404, detail="Payment not found")
-
-    tenant = payment.tenant
-    hostel = tenant.hostel
-    payment_date = payment.payment_date.strftime("%Y-%m-%d %H:%M:%S") if payment.payment_date else "N/A"
-    html = f"""
-    <!DOCTYPE html>
-    <html lang=\"en\">
-    <head>
-      <meta charset=\"UTF-8\" />
-      <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />
-      <title>Payment Slip</title>
-      <style>
-        body {{ font-family: Arial, sans-serif; margin: 0; padding: 0; background: #f6f6f6; }}
-        .container {{ max-width: 800px; margin: 24px auto; padding: 24px; background: #fff; border-radius: 8px; box-shadow: 0 0 20px rgba(0,0,0,0.08); }}
-        .header {{ text-align: center; margin-bottom: 20px; }}
-        .header h1 {{ margin: 0; font-size: 28px; }}
-        .header p {{ margin: 4px 0; color: #555; }}
-        .details, .footer {{ margin-top: 20px; }}
-        .details table {{ width: 100%; border-collapse: collapse; }}
-        .details th, .details td {{ padding: 10px 12px; border: 1px solid #ddd; text-align: left; }}
-        .details th {{ background: #f0f0f0; }}
-        .summary {{ margin-top: 24px; padding: 16px; background: #f9f9f9; border-radius: 6px; }}
-        .print-button {{ display: inline-block; margin-top: 20px; padding: 10px 18px; background: #2d7cff; color: #fff; text-decoration: none; border-radius: 4px; }}
-        @media print {{
-          .print-button {{ display: none; }}
-          body {{ background: #fff; }}
-        }}
-      </style>
-    </head>
-    <body>
-      <div class=\"container\">
-        <div class=\"header\">
-          <h1>Payment Slip</h1>
-          <p>Payment ID: {payment.id}</p>
-          <p>Date: {payment_date}</p>
-        </div>
-        <div class=\"details\">
-          <table>
-            <tr><th>Field</th><th>Details</th></tr>
-            <tr><td>Tenant Name</td><td>{tenant.name if tenant else 'N/A'}</td></tr>
-            <tr><td>Tenant Phone</td><td>{tenant.phone_number if tenant else 'N/A'}</td></tr>
-            <tr><td>Hostel</td><td>{hostel.name if hostel else 'N/A'}</td></tr>
-            <tr><td>Payment Amount</td><td>₹{payment.amount}</td></tr>
-            <tr><td>Payment Method</td><td>{payment.payment_method or 'N/A'}</td></tr>
-            <tr><td>Transaction ID</td><td>{payment.transaction_id or 'N/A'}</td></tr>
-            <tr><td>Payment Status</td><td>Completed</td></tr>
-          </table>
-        </div>
-        <div class=\"summary\">
-          <h2>Payment Summary</h2>
-          <p>This slip confirms receipt of payment from the tenant for the current billing cycle.</p>
-          <p>For any questions, contact the hostel administrator.</p>
-        </div>
-        <div class=\"footer\">
-          <a href=\"#\" class=\"print-button\" onclick=\"window.print(); return false;\">Print Slip</a>
-        </div>
-      </div>
-    </body>
-    </html>
-    """
-    return HTMLResponse(content=html)
-
-
-@router.put("/payments/{payment_id}", response_model=TenantPaymentOut, tags=["Payments"])
-def update_payment(
-    payment_id: int,
-    payment_update: TenantPaymentUpdate,
-    current_owner: dict = Depends(get_current_owner),
-    db: Session = Depends(get_db)
-):
-    """Update a payment"""
-    payment = db.query(TenantPayment).join(Tenant).join(Hostel).filter(
-        TenantPayment.id == payment_id,
-        Hostel.owner_id == current_owner["id"]
-    ).first()
-    if not payment:
-        raise HTTPException(status_code=404, detail="Payment not found")
-    
-    update_data = payment_update.model_dump(exclude_unset=True)
-    for field, value in update_data.items():
-        setattr(payment, field, value)
-    db.commit()
-    db.refresh(payment)
-    return payment
-
-
-@router.delete("/payments/{payment_id}", tags=["Payments"])
-def delete_payment(
-    payment_id: int,
-    current_owner: dict = Depends(get_current_owner),
-    db: Session = Depends(get_db)
-):
-    """Delete a payment"""
-    payment = db.query(TenantPayment).join(Tenant).join(Hostel).filter(
-        TenantPayment.id == payment_id,
-        Hostel.owner_id == current_owner["id"]
-    ).first()
-    if not payment:
-        raise HTTPException(status_code=404, detail="Payment not found")
-    db.delete(payment)
-    db.commit()
-    return {"message": "Payment deleted successfully"}
 
 @router.get("/dashboard", tags=["Dashboard"])
 def get_dashboard_data(

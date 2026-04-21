@@ -8,6 +8,8 @@ import logging
 from sqlalchemy import inspect
 
 from modules.owner.routes import router, auth_router
+from modules.bill_payment.routes import router as bill_router
+from modules.expenses.routes import router as expense_router
 from core.database import SessionLocal
 
 from core.config import DATABASE_URL
@@ -40,6 +42,8 @@ def root():
 
 app.include_router(auth_router)
 app.include_router(router)
+app.include_router(bill_router)
+app.include_router(expense_router)
 
 
 
