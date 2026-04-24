@@ -1,6 +1,6 @@
 from typing import List, Optional
 from sqlalchemy.orm import Session
-from sqlalchemy import and_
+from sqlalchemy import and_, func
 from datetime import datetime
 
 from .models import Bill, Transaction
@@ -67,16 +67,41 @@ def get_transaction(db: Session, transaction_id: int) -> Optional[Transaction]:
     return db.query(Transaction).filter(Transaction.id == transaction_id).first()
 
 
+def _reconcile_bill_status(db: Session, bill_id: int) -> None:
+    """Recalculate bill status based on successful transactions and due date."""
+    bill = db.query(Bill).filter(Bill.id == bill_id).first()
+    if not bill:
+        return
+
+    paid_amount = db.query(func.coalesce(func.sum(Transaction.amount), 0)).filter(
+        Transaction.bill_id == bill_id,
+        Transaction.status == "success"
+    ).scalar() or 0
+
+    if paid_amount >= bill.amount:
+        bill.status = "paid"
+    elif bill.due_date and bill.due_date < datetime.utcnow():
+        bill.status = "overdue"
+    else:
+        bill.status = "pending"
+
+    db.commit()
+    db.refresh(bill)
+
+
 def create_transaction(db: Session, transaction: TransactionCreate) -> Transaction:
     """Create a new transaction"""
     db_transaction = Transaction(**transaction.model_dump())
     db.add(db_transaction)
     db.commit()
     db.refresh(db_transaction)
+
+    _reconcile_bill_status(db, db_transaction.bill_id)
     return db_transaction
 
 
 def update_transaction(db: Session, transaction_id: int, transaction_update: TransactionUpdate) -> Optional[Transaction]:
+
     """Update an existing transaction"""
     db_transaction = db.query(Transaction).filter(Transaction.id == transaction_id).first()
     if not db_transaction:
@@ -88,6 +113,8 @@ def update_transaction(db: Session, transaction_id: int, transaction_update: Tra
     
     db.commit()
     db.refresh(db_transaction)
+
+    _reconcile_bill_status(db, db_transaction.bill_id)
     return db_transaction
 
 

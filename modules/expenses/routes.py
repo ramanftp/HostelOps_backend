@@ -11,7 +11,7 @@ from modules.owner.models import Hostel
 from . import services
 from .schema import ExpenseCreate, ExpenseUpdate, ExpenseOut
 
-router = APIRouter(prefix="/expenses", tags=["Expenses"])
+router = APIRouter(prefix="/owner/expenses", tags=["Expenses"])
 
 
 # ============================================================================

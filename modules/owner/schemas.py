@@ -101,6 +101,7 @@ class HostelBase(BaseSchema):
     upi_id: Optional[str] = None
     is_cash: Optional[bool] = True
     facilities: Optional[List[str]] = None
+    theme_color: Optional[str] = Field(None, pattern=r'^#[0-9A-Fa-f]{6}$')  # Hex color code
 
 class HostelCreate(HostelBase):
     pass
@@ -122,6 +123,7 @@ class HostelUpdate(BaseSchema):
     upi_id: Optional[str] = None
     is_cash: Optional[bool] = None
     facilities: Optional[List[str]] = None
+    theme_color: Optional[str] = Field(None, pattern=r'^#[0-9A-Fa-f]{6}$')  # Hex color code
 
 class HostelOut(HostelBase):
     id: int
@@ -137,6 +139,7 @@ class RoomBase(BaseSchema):
     room_number: str = Field(..., max_length=20)
     no_of_beds: Optional[int] = None
     no_of_occupied_beds: Optional[int] = None
+    theme_color: Optional[str] = Field(None, pattern=r'^#[0-9A-Fa-f]{6}$')  # Hex color code
 
 class RoomCreate(RoomBase):
     hostel_id: int
@@ -147,6 +150,7 @@ class RoomUpdate(BaseSchema):
     room_type: Optional[str] = None  # Room type name for updates
     no_of_beds: Optional[int] = None
     no_of_occupied_beds: Optional[int] = None
+    theme_color: Optional[str] = Field(None, pattern=r'^#[0-9A-Fa-f]{6}$')  # Hex color code
 
 class RoomOut(RoomBase):
     id: int
@@ -162,6 +166,7 @@ class RoomTypeSchema(BaseModel):
     id: int
     name: str
     description: Optional[str] = None
+    theme_color: Optional[str] = Field(None, pattern=r'^#[0-9A-Fa-f]{6}$')  # Hex color code
 
     class Config:
         from_attributes = True  
@@ -170,11 +175,13 @@ class RoomTypeSchema(BaseModel):
 class RoomTypeCreate(BaseModel):
     name: str = Field(..., max_length=50)
     description: Optional[str] = Field(None, max_length=200)
+    theme_color: Optional[str] = Field(None, pattern=r'^#[0-9A-Fa-f]{6}$')  # Hex color code
 
 
 class RoomTypeUpdate(BaseModel):
     name: Optional[str] = Field(None, max_length=50)
-    description: Optional[str] = Field(None, max_length=200)  
+    description: Optional[str] = Field(None, max_length=200)
+    theme_color: Optional[str] = Field(None, pattern=r'^#[0-9A-Fa-f]{6}$')  # Hex color code  
 
 
 class TenantBase(BaseSchema):
@@ -182,7 +189,7 @@ class TenantBase(BaseSchema):
     email: Optional[str] = Field(None, max_length=100)
     phone_number: str = Field(..., pattern=r'^\+?[1-9]\d{1,14}$')
     emergency_contact_name: Optional[str] = None
-    emergency_contact_phone: Optional[str] = Field(None, pattern=r'^\+?[1-9]\d{1,14}$')
+    emergency_contact_phone: Optional[str] 
     emergency_contact_relationship: Optional[str] = None
     gender: Optional[str] = None
     photo_url: Optional[str] = None
@@ -191,7 +198,7 @@ class TenantBase(BaseSchema):
     rent: Optional[int] = None
     join_date: Optional[datetime] = None
     security_deposit: Optional[int] = None
-    alternate_phone_number: Optional[str] = Field(None, pattern=r'^\+?[1-9]\d{1,14}$')
+    alternate_phone_number: Optional[str] 
     address: Optional[str] = None
     city: Optional[str] = None
     state: Optional[str] = None
@@ -209,11 +216,11 @@ class TenantUpdate(BaseSchema):
     email: Optional[str] = Field(None, max_length=100)
     phone_number: Optional[str] = Field(None, pattern=r'^\+?[1-9]\d{1,14}$')
     emergency_contact_name: Optional[str] = None
-    emergency_contact_phone: Optional[str] = Field(None, pattern=r'^\+?[1-9]\d{1,14}$')
+    emergency_contact_phone: Optional[str]
     emergency_contact_relationship: Optional[str] = None
     gender: Optional[str] = None
     security_deposit: Optional[int] = None
-    alternate_phone_number: Optional[str] = Field(None, pattern=r'^\+?[1-9]\d{1,14}$')
+    alternate_phone_number: Optional[str] 
     join_date: Optional[datetime] = None
     photo_url: Optional[str] = None
     aadhaar_number: Optional[str] = None

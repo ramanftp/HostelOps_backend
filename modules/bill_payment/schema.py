@@ -41,7 +41,7 @@ class TransactionBase(BaseSchema):
     bill_id: int
     amount: int
     payment_method: Optional[str] = None
-    status: Optional[str] = "success"
+    status: Optional[str] = "pending"
     tenant_id: int
     hostel_id: int
 
@@ -53,9 +53,14 @@ class TransactionUpdate(BaseSchema):
     amount: Optional[int] = None
     payment_method: Optional[str] = None
     status: Optional[str] = None
+    transaction_id: Optional[str] = None
+    bill_pdf_url: Optional[str] = None
 
 class TransactionOut(TransactionBase):
     id: int
     transaction_date: datetime
+    transaction_id: Optional[str] = None
+    bill_pdf_url: Optional[str] = None
+    payment_method: Optional[str] = None
     tenant : Optional["TenantOut"] = None
     bill: Optional["BillOut"] = None

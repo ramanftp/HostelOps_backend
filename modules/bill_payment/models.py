@@ -36,8 +36,11 @@ class Transaction(Base):
     bill_id = Column(Integer, ForeignKey("bills.id"), nullable=False)
     amount = Column(Integer, nullable=False)
     transaction_date = Column(DateTime(timezone=True), server_default=func.now())
+
     payment_method = Column(String(50), nullable=True)  # e.g., credit card, UPI, etc.
-    status = Column(String(20), default="success", nullable=False)  # success, failed
+    status = Column(String(20), default="pending", nullable=False)  # pending, success, failed, verified
+    transaction_id = Column(String(100), unique=True, nullable=True)
+    bill_pdf_url = Column(String(200), nullable=True)  # URL to the generated PDF receipt
     tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False)
     hostel_id = Column(Integer, ForeignKey("hostels.id"), nullable=False)
     bill = relationship("Bill", back_populates="transactions")

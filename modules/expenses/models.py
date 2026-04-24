@@ -19,6 +19,7 @@ class Expense(Base):
     created_by = Column(Integer, ForeignKey("owners.id"), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
+    
 
     hostel = relationship("Hostel", back_populates="expenses")
     owner = relationship("Owner", back_populates="expenses")

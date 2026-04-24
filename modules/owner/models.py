@@ -4,6 +4,7 @@ import uuid
 from sqlalchemy import UUID, Column, Integer, String, Boolean, DateTime, JSON, ForeignKey
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
+from sqlalchemy.ext.hybrid import hybrid_property
 from datetime import datetime
 import enum
 
@@ -63,6 +64,7 @@ class Hostel(Base):
     category = Column(String(20), nullable=True)  # women, men, coliving...
     is_cash = Column(Boolean, default=True)
     facilities = Column(JSON, nullable=True)  # List of facilities
+    theme_color = Column(String(7), nullable=True, default="#3B82F6")  # Hex color code
 
 
     owner = relationship("Owner", back_populates="hostels")
@@ -79,6 +81,7 @@ class RoomType(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(50), unique=True, nullable=False)
     description = Column(String(200), nullable=True)
+    theme_color = Column(String(7), nullable=True, default="#10B981")  # Hex color code
     
 
 class Room(Base):
@@ -89,7 +92,7 @@ class Room(Base):
     room_number = Column(String(20), nullable=False)
     room_type = Column(Integer, ForeignKey("room_types.id"), nullable=True)  # e.g., Single, Double, Dormitory
     no_of_beds = Column(Integer, nullable=True)
-    no_of_occupied_beds = Column(Integer, nullable=True, default=0)
+    theme_color = Column(String(7), nullable=True, default="#8B5CF6")  # Hex color code
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
@@ -97,6 +100,15 @@ class Room(Base):
     hostel = relationship("Hostel", back_populates="rooms")
     room_type_rel = relationship("RoomType", backref="rooms")
     tenants = relationship("Tenant", back_populates="room", cascade="all, delete-orphan")
+
+    @hybrid_property
+    def no_of_occupied_beds(self):
+        # Count tenants in this room
+        from sqlalchemy.orm import object_session
+        session = object_session(self)
+        if session:
+            return session.query(Tenant).filter(Tenant.room_id == self.id).count()
+        return 0
 
 
 

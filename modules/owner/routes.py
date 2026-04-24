@@ -5,13 +5,15 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status, Request, UploadFile, File
 from fastapi.responses import HTMLResponse
 from requests import session
-from sqlalchemy import func
+from sqlalchemy import Transaction, func
 from sqlalchemy.orm import Session
 
 from core.config import settings
 from core.database import get_db
 from modules.owner import services
 from modules.owner.models import Owner, Hostel, Room, RoomType, Tenant
+from modules.bill_payment.models import Transaction as BillTransaction
+from modules.expenses.models import Expense
 from modules.owner.schemas import (
     OTPRequest, OTPVerify, OTPResponse, LoginResponse,
     HostelCreate, HostelUpdate, HostelOut, OwnerCreate, OwnerUpdate, OwnerOut, OwnerdetailHostelRoomOut,
@@ -543,7 +545,7 @@ def create_tenant(
         ).first()
         if not room:
             raise HTTPException(status_code=404, detail="Room not found in hostel")
-    db_tenant = Tenant(**tenant.model_dump(), hostel_id=hostel_id)
+    db_tenant = Tenant(**tenant.model_dump(exclude={'hostel_id'}), hostel_id=hostel_id)
     db.add(db_tenant)
     db.commit()
     db.refresh(db_tenant)
@@ -689,6 +691,7 @@ def get_dashboard_data(
 
         room_filter = Room.hostel_id == hostel_id
         tenant_filter = Tenant.hostel_id == hostel_id
+        expense_filter = Expense.hostel_id == hostel_id
 
     else:
         # 🔥 IMPORTANT: filter by owner (you missed this earlier)
@@ -698,15 +701,20 @@ def get_dashboard_data(
 
         room_filter = Room.hostel_id.in_(hostel_ids)
         tenant_filter = Tenant.hostel_id.in_(hostel_ids)
+        expense_filter = Expense.hostel_id.in_(hostel_ids)
+
+    # Filter expenses by owner
+    expense_filter = expense_filter & (Expense.created_by == current_owner["id"])
 
     rooms_count = db.query(Room).filter(room_filter).count() or 0
     bed_count = db.query(func.sum(Room.no_of_beds)).filter(room_filter).scalar() or 0
     tenants_count = db.query(Tenant).filter(tenant_filter).count() or 0
     total_amount = db.query(func.sum(Tenant.rent)).filter(tenant_filter).scalar() or 0
-    total_payments = db.query(func.sum(TenantPayment.amount))\
+    total_payments = db.query(func.sum(BillTransaction.amount))\
         .join(Tenant)\
         .filter(tenant_filter)\
         .scalar() or 0
+    total_expenses = db.query(func.sum(Expense.amount)).filter(expense_filter).scalar() or 0
 
     payment_due = total_amount - total_payments
 
@@ -717,8 +725,162 @@ def get_dashboard_data(
         "vacant_beds": bed_count - tenants_count,
         "total_amount": total_amount,
         "total_payments": total_payments,
+        "total_expenses": total_expenses,
         "payment_due": payment_due
     }
+
+
+# ============================================================================
+# Image Upload Endpoints
+# ============================================================================
+
+import os
+import shutil
+import uuid
+
+UPLOAD_DIR = "uploads"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+@router.post("/upload-photo", tags=["Uploads"])
+async def upload_photo(
+    file: UploadFile = File(...),
+    current_owner: dict = Depends(get_current_owner),
+    db: Session = Depends(get_db)
+):
+    """Upload a photo for the current owner"""
+    owner_id = current_owner["id"]
+    
+    owner = db.query(Owner).filter(Owner.id == owner_id).first()
+    if not owner:
+        raise HTTPException(status_code=404, detail="Owner not found")
+
+    if not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="File must be an image")
+
+    file_extension = os.path.splitext(file.filename)[1]
+    unique_filename = f"{uuid.uuid4()}{file_extension}"
+    file_path = os.path.join(UPLOAD_DIR, unique_filename)
+
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    url = f"/uploads/{unique_filename}"
+    owner.photo_url = url
+
+    db.commit()
+    db.refresh(owner)
+
+    return {"url": url, "message": "Photo uploaded successfully"}
+
+
+@router.post("/upload/owner/{owner_id}/photo", tags=["Uploads"])
+async def upload_owner_photo(
+    owner_id: int,
+    file: UploadFile = File(...),
+    current_owner: dict = Depends(get_current_owner),
+    db: Session = Depends(get_db)
+):
+    """Upload a single photo for an owner"""
+    if current_owner["id"] != owner_id:
+        raise HTTPException(status_code=403, detail="Cannot upload photos for other owners")
+
+    owner = db.query(Owner).filter(Owner.id == owner_id).first()
+    if not owner:
+        raise HTTPException(status_code=404, detail="Owner not found")
+
+    if not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="File must be an image")
+
+    file_extension = os.path.splitext(file.filename)[1]
+    unique_filename = f"{uuid.uuid4()}{file_extension}"
+    file_path = os.path.join(UPLOAD_DIR, unique_filename)
+
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    url = f"/uploads/{unique_filename}"
+    owner.photo_url = url
+
+    db.commit()
+    db.refresh(owner)
+
+    return {"url": url, "message": "Owner photo uploaded successfully"}
+
+
+@router.post("/upload/tenant/{tenant_id}/photo", tags=["Uploads"])
+async def upload_tenant_photo(
+    tenant_id: int,
+    file: UploadFile = File(...),
+    current_owner: dict = Depends(get_current_owner),
+    db: Session = Depends(get_db)
+):
+    """Upload a single photo for a tenant"""
+    tenant = db.query(Tenant).join(Hostel).filter(
+        Tenant.id == tenant_id,
+        Hostel.owner_id == current_owner["id"]
+    ).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+
+    if not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="File must be an image")
+
+    file_extension = os.path.splitext(file.filename)[1]
+    unique_filename = f"{uuid.uuid4()}{file_extension}"
+    file_path = os.path.join(UPLOAD_DIR, unique_filename)
+
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    url = f"/uploads/{unique_filename}"
+    tenant.photo_url = url
+
+    db.commit()
+    db.refresh(tenant)
+
+    return {"url": url, "message": "Tenant photo uploaded successfully"}
+
+
+@router.post("/upload/hostel/{hostel_id}/photos", tags=["Uploads"])
+async def upload_hostel_photos(
+    hostel_id: int,
+    files: List[UploadFile] = File(...),
+    current_owner: dict = Depends(get_current_owner),
+    db: Session = Depends(get_db)
+):
+    """Upload multiple photos for a hostel"""
+    hostel = db.query(Hostel).filter(
+        Hostel.id == hostel_id,
+        Hostel.owner_id == current_owner["id"]
+    ).first()
+    if not hostel:
+        raise HTTPException(status_code=404, detail="Hostel not found")
+
+    urls = []
+    for file in files:
+        if not file.content_type.startswith("image/"):
+            raise HTTPException(status_code=400, detail=f"File {file.filename} must be an image")
+
+        file_extension = os.path.splitext(file.filename)[1]
+        unique_filename = f"{uuid.uuid4()}{file_extension}"
+        file_path = os.path.join(UPLOAD_DIR, unique_filename)
+
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        url = f"/uploads/{unique_filename}"
+        urls.append(url)
+
+    if hostel.photos_urls:
+        hostel.photos_urls.extend(urls)
+    else:
+        hostel.photos_urls = urls
+
+    db.commit()
+    db.refresh(hostel)
+
+    return {"urls": urls, "message": f"Uploaded {len(urls)} photos successfully"}
+
 
 # Include auth router
 # router.include_router(auth_router)

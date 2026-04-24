@@ -3,6 +3,7 @@ from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
+from fastapi.staticfiles import StaticFiles
 import logging
 
 from sqlalchemy import inspect
@@ -19,15 +20,16 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="HostelOps API", version="1.0.0")
 
+# Mount static files for uploaded images
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+
 
 
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-       "*"
-    ],
-    allow_credentials=True,   # set True only if using cookies
+    allow_origins=["*"],  # or your frontend URL
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )

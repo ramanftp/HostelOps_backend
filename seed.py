@@ -281,7 +281,6 @@ def seed_rooms(db: Session):
                 "room_number": f"{hostel.id}0{room_num}",
                 "room_type": room_type_id,
                 "no_of_beds": no_of_beds,
-                "no_of_occupied_beds": no_of_occupied,
             }
             
             # Check if room already exists
@@ -360,10 +359,6 @@ def seed_tenants(db: Session):
             tenant = Tenant(**tenant_data)
             db.add(tenant)
             tenants.append(tenant)
-            
-            # Update room occupancy
-            room.no_of_occupied_beds += 1
-            db.add(room)
     
     db.commit()
     print(f"✓ Created {len(tenants)} demo tenant records")
