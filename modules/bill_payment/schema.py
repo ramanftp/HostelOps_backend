@@ -20,6 +20,7 @@ class BillBase(BaseSchema):
     due_date: datetime
     description: Optional[str] = None
     status: Optional[str] = "pending"
+    payment_method: Optional[str] = None    
 
 class BillCreate(BillBase):
     pass
@@ -29,12 +30,18 @@ class BillUpdate(BaseSchema):
     due_date: Optional[datetime] = None
     description: Optional[str] = None
     status: Optional[str] = None
+    transaction_id: Optional[str] = None
+    bill_pdf_url: Optional[str] = None
+    payment_method: Optional[str] = None
 
 class BillOut(BillBase):
     id: int
     bill_number: str
     created_at: datetime
     updated_at: datetime
+    transaction_id: Optional[str] = None
+    bill_pdf_url: Optional[str] = None
+    payment_method: Optional[str] = None
     tenant : Optional["TenantOut"] = None
 
 class TransactionBase(BaseSchema):
@@ -53,14 +60,13 @@ class TransactionUpdate(BaseSchema):
     amount: Optional[int] = None
     payment_method: Optional[str] = None
     status: Optional[str] = None
-    transaction_id: Optional[str] = None
-    bill_pdf_url: Optional[str] = None
 
 class TransactionOut(TransactionBase):
     id: int
     transaction_date: datetime
-    transaction_id: Optional[str] = None
-    bill_pdf_url: Optional[str] = None
     payment_method: Optional[str] = None
     tenant : Optional["TenantOut"] = None
     bill: Optional["BillOut"] = None
+
+class BillOtp(BaseSchema):
+    otp: str = Field(..., min_length=4, max_length=6)  

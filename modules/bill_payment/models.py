@@ -23,7 +23,9 @@ class Bill(Base):
     status = Column(String(20), default="pending", nullable=False)  # pending, paid, overdue
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
-
+    payment_method = Column(String(50), nullable=True)  # e.g., credit card, UPI, etc.
+    transaction_id = Column(String(100), unique=True, nullable=True)
+    bill_pdf_url = Column(String(200), nullable=True)
     hostel = relationship("Hostel", back_populates="bills")
     tenant = relationship("Tenant", back_populates="bills")
     transactions = relationship("Transaction", back_populates="bill", cascade="all, delete-orphan")
@@ -39,8 +41,7 @@ class Transaction(Base):
 
     payment_method = Column(String(50), nullable=True)  # e.g., credit card, UPI, etc.
     status = Column(String(20), default="pending", nullable=False)  # pending, success, failed, verified
-    transaction_id = Column(String(100), unique=True, nullable=True)
-    bill_pdf_url = Column(String(200), nullable=True)  # URL to the generated PDF receipt
+  # URL to the generated PDF receipt
     tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False)
     hostel_id = Column(Integer, ForeignKey("hostels.id"), nullable=False)
     bill = relationship("Bill", back_populates="transactions")

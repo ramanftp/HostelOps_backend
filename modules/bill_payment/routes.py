@@ -4,6 +4,7 @@ import random
 import string
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from psycopg import Transaction
 from sqlalchemy.orm import Session
 
 from core.database import get_db
@@ -12,7 +13,7 @@ from modules.owner.models import Hostel, Tenant
 
 from . import services
 from .schema import (
-    BillCreate, BillUpdate, BillOut,
+    BillCreate, BillOtp, BillUpdate, BillOut,
     TransactionCreate, TransactionUpdate, TransactionOut
 )
 
@@ -357,185 +358,184 @@ def get_pending_bills(
 # ============================================================================
 # Cash Transaction OTP Verification Endpoints
 # ============================================================================
+import redis
+import json
+import random
+import string
 
-# In-memory storage for OTPs (in production, use Redis or database)
-otp_storage = {}
 
+# =========================
+# REDIS SETUP
+# =========================
+redis_client = redis.Redis(
+    host="localhost",
+    port=6379,
+    db=0,
+    decode_responses=True
+)
+
+OTP_EXPIRY = 300  # 5 minutes
+
+
+# =========================
+
+# =========================
+# OTP UTIL FUNCTIONS
+# =========================
 def generate_otp():
-    """Generate a 6-digit OTP"""
     return ''.join(random.choices(string.digits, k=6))
 
-def send_otp_to_tenant(tenant_phone: str, otp: str):
-    """
-    Send OTP to tenant (mock implementation)
-    In production, integrate with SMS service like Twilio, etc.
-    """
-    print(f"📱 Sending OTP {otp} to tenant phone: {tenant_phone}")
-    # Mock: In production, use actual SMS service
-    # Example with Twilio:
-    # from twilio.rest import Client
-    # client = Client(account_sid, auth_token)
-    # client.messages.create(
-    #     body=f"Your OTP for cash payment verification is: {otp}",
-    #     from_='+1234567890',
-    #     to=tenant_phone
-    # )
+
+def store_otp(bill_id: int, otp: str, tenant_id: int):
+    data = {
+        "otp": otp,
+        "tenant_id": tenant_id,
+        "attempts": 0
+    }
+
+    redis_client.setex(
+        f"otp:{bill_id}",
+        OTP_EXPIRY,
+        json.dumps(data)
+    )
+
+
+def get_otp_data(bill_id: int):
+    data = redis_client.get(f"otp:{bill_id}")
+    if not data:
+        return None
+    return json.loads(data)
+
+
+def delete_otp(bill_id: int):
+    redis_client.delete(f"otp:{bill_id}")
+
+
+def increment_attempts(bill_id: int):
+    data = get_otp_data(bill_id)
+    if not data:
+        return None
+
+    data["attempts"] += 1
+
+    redis_client.setex(
+        f"otp:{bill_id}",
+        OTP_EXPIRY,
+        json.dumps(data)
+    )
+
+    return data["attempts"]
+
+
+def send_otp_to_tenant(phone: str, otp: str):
+    # MOCK SMS
+    print(f"📱 OTP {otp} sent to {phone}")
     return True
 
+
+# ============================================================================
+# SEND OTP
+# ============================================================================
 @router.post("/transactions/{bill_id}/send-otp", tags=["Cash Transactions"])
 def send_cash_payment_otp(
     bill_id: int,
     current_owner: dict = Depends(get_current_owner),
     db: Session = Depends(get_db)
 ):
-    """Send OTP for cash transaction verification"""
     bill = services.get_bill(db, bill_id)
     if not bill:
         raise HTTPException(status_code=404, detail="Bill not found")
 
-
-    
-    # Verify ownership
+    # ownership check
     hostel = db.query(Hostel).filter(
         Hostel.id == bill.hostel_id,
         Hostel.owner_id == current_owner["id"]
     ).first()
-    if not hostel:
-        raise HTTPException(status_code=404, detail="Transaction not found")
-    
 
-    
-    # Get tenant details
+    if not hostel:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+
     tenant = db.query(Tenant).filter(Tenant.id == bill.tenant_id).first()
-    if not tenant or not tenant.phone:
-        raise HTTPException(status_code=400, detail="Tenant phone number not found")
-    
-    # Generate OTP
+    if not tenant or not tenant.phone_number:
+        raise HTTPException(status_code=400, detail="Tenant phone not found")
+
     otp = generate_otp()
-    
-    # Store OTP with expiration (5 minutes)
-    otp_storage[bill_id] = {
-        "otp": otp,
-        "expires_at": datetime.now().timestamp() + 300,  # 5 minutes
-        "tenant_id": bill.tenant_id
-    }
-    
-    # Send OTP to tenant
-    send_otp_to_tenant(tenant.phone, otp)
-    
+
+    store_otp(bill_id, otp, tenant.id)
+
+    send_otp_to_tenant(tenant.phone_number, otp)
+
     return {
         "message": "OTP sent successfully",
         "bill_id": bill_id,
-        "tenant_phone": tenant.phone[-4:] + "****"  # Mask phone number
+        "phone": "****" + tenant.phone_number[-4:]
     }
 
+
+# ============================================================================
+# VERIFY OTP
+# ============================================================================
 @router.post("/transactions/{bill_id}/verify-otp", tags=["Cash Transactions"])
 def verify_cash_payment_otp(
     bill_id: int,
-    otp_data: dict,
+    otp_data: BillOtp,
     current_owner: dict = Depends(get_current_owner),
     db: Session = Depends(get_db)
 ):
-    """Verify OTP and update cash transaction status"""
-    if "otp" not in otp_data:
+    if not otp_data.otp:
         raise HTTPException(status_code=400, detail="OTP is required")
-    
-    otp = otp_data["otp"]
-    
+
     bill = services.get_bill(db, bill_id)
     if not bill:
         raise HTTPException(status_code=404, detail="Bill not found")
-    
 
-    
-    # Verify ownership
     hostel = db.query(Hostel).filter(
         Hostel.id == bill.hostel_id,
         Hostel.owner_id == current_owner["id"]
     ).first()
+
     if not hostel:
-        raise HTTPException(status_code=404, detail="Transaction not found")
-    
-    # Check if OTP exists and is valid
-    if bill_id not in otp_storage:
-        raise HTTPException(status_code=400, detail="OTP not sent or expired")
-    
-    stored_otp_data = otp_storage[bill_id]
-    
-    # Check expiration
-    if datetime.now().timestamp() > stored_otp_data["expires_at"]:
-        del otp_storage[bill_id]
-        raise HTTPException(status_code=400, detail="OTP expired")
-    
-    # Verify OTP
-    if stored_otp_data["otp"] != otp:
-        raise HTTPException(status_code=400, detail="Invalid OTP")
-    
-    # Update transaction status to verified
-    trancsation = TransactionCreate(
+        raise HTTPException(status_code=403, detail="Unauthorized")
+
+    stored = get_otp_data(bill_id)
+
+    if not stored:
+        raise HTTPException(status_code=400, detail="OTP expired or not found")
+
+    # max 3 attempts
+    if stored["attempts"] >= 3:
+        delete_otp(bill_id)
+        raise HTTPException(status_code=400, detail="Too many attempts")
+
+    if stored["otp"] != otp_data.otp:
+        attempts = increment_attempts(bill_id)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid OTP ({attempts}/3 attempts used)"
+        )
+
+    # ✅ OTP correct → create transaction
+    new_txn = TransactionCreate(
         bill_id=bill_id,
         amount=bill.amount,
         payment_method="cash",
         status="verified",
-        tenant_id=stored_otp_data["tenant_id"],
+        tenant_id=stored["tenant_id"],
         hostel_id=bill.hostel_id
-    )
+    )   
     
-    # Update bill status to paid if transaction is verified
-    if bill:
-        bill_update = BillUpdate(status="paid")
-        services.update_bill(db, bill.id, bill_update)
-    
-    # Clear OTP from storage
-    del otp_storage[bill_id]
-    
+    new_txn = services.create_transaction(db, new_txn)
+
+    # update bill
+    bill.status = "paid"
+
+
+
+    delete_otp(bill_id)
+
     return {
         "message": "OTP verified successfully",
-        "transaction_id": trancsation,
+        "transaction_id": new_txn.id,
         "status": "verified",
         "bill_status": "paid"
     }
-
-@router.post("/transactions/{bill_id}/resend-otp", tags=["Cash Transactions"])
-def resend_cash_payment_otp(
-    bill_id: int,
-    current_owner: dict = Depends(get_current_owner),
-    db: Session = Depends(get_db)
-):
-    """Resend OTP for cash transaction verification"""
-    bill = services.get_bill(db, bill_id)
-    if not bill:
-        raise HTTPException(status_code=404, detail="Bill not found")
-    
-    # Verify ownership
-    hostel = db.query(Hostel).filter(
-        Hostel.id == bill.hostel_id,
-        Hostel.owner_id == current_owner["id"]
-    ).first()
-    if not hostel:
-        raise HTTPException(status_code=404, detail="Transaction not found")
-    
-    # Check if payment method is cash
-    tenant = db.query(Tenant).filter(Tenant.id == bill.tenant_id).first()
-    if not tenant or not tenant.phone:
-        raise HTTPException(status_code=400, detail="Tenant phone number not found")
-    
-    # Generate new OTP
-    otp = generate_otp()
-    
-    # Store OTP with expiration (5 minutes)
-    otp_storage[bill_id] = {
-        "otp": otp,
-        "expires_at": datetime.now().timestamp() + 300,  # 5 minutes
-        "tenant_id": bill.tenant_id
-    }
-    
-    # Send OTP to tenant
-    send_otp_to_tenant(tenant.phone, otp)
-    
-    return {
-        "message": "OTP resent successfully",
-        "transaction_id": bill_id,
-        "tenant_phone": tenant.phone[-4:] + "****"  # Mask phone number
-    }
-
