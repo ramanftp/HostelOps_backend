@@ -11,13 +11,15 @@ DATABASE_URL = os.getenv(
 
 )
 
+FIRE_BASE_CREDENTIALS_PATH = os.getenv("Firebase_Credentials_Path")
+
 SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret")
 auth_key = os.getenv("MSG91_AUTH_KEY")
 otp_template_id = os.getenv("MSG91_OTP_TEMPLATE_ID")
 
 import os
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
 from typing import Optional
 
@@ -53,7 +55,7 @@ class Settings(BaseSettings):
     # Upload storage configuration
     UPLOAD_BASE_DIR: str = "modules/static/uploads"
     UPLOAD_URL_BASE: str = "/static/uploads"
-
+    FIRE_BASE_CREDENTIALS_PATH: str = Field(alias="Firebase_Credentials_Path")
     @field_validator(
         "GOOGLE_CLOUD_CREDENTIALS_PATH",
         "UPLOAD_BASE_DIR",

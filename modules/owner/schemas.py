@@ -101,7 +101,6 @@ class HostelBase(BaseSchema):
     upi_id: Optional[str] = None
     is_cash: Optional[bool] = True
     facilities: Optional[List[str]] = None
-    theme_color: Optional[str] = Field(None, pattern=r'^#[0-9A-Fa-f]{6}$')  # Hex color code
 
 class HostelCreate(HostelBase):
     pass
@@ -123,7 +122,6 @@ class HostelUpdate(BaseSchema):
     upi_id: Optional[str] = None
     is_cash: Optional[bool] = None
     facilities: Optional[List[str]] = None
-    theme_color: Optional[str] = Field(None, pattern=r'^#[0-9A-Fa-f]{6}$')  # Hex color code
 
 class HostelOut(HostelBase):
     id: int
@@ -138,20 +136,17 @@ class HostelOut(HostelBase):
 class RoomBase(BaseSchema):
     room_number: str = Field(..., max_length=20)
     no_of_beds: Optional[int] = None
-    no_of_occupied_beds: Optional[int] = None
-    theme_color: Optional[str] = Field(None, pattern=r'^#[0-9A-Fa-f]{6}$')  # Hex color code
 
 class RoomCreate(RoomBase):
     hostel_id: int
-    room_type: Optional[str] = None  # Room type name for creation
+    room_type: Optional[int] = None  # Room type name for creation
 
 class RoomUpdate(BaseSchema):
     room_number: Optional[str] = Field(None, max_length=20)
-    room_type: Optional[str] = None  # Room type name for updates
+    room_type: Optional[int] = None  # Nested RoomType for updates
     no_of_beds: Optional[int] = None
     no_of_occupied_beds: Optional[int] = None
-    theme_color: Optional[str] = Field(None, pattern=r'^#[0-9A-Fa-f]{6}$')  # Hex color code
-
+    theme_color: Optional[str] = None
 class RoomOut(RoomBase):
     id: int
     hostel_id: int
@@ -166,7 +161,7 @@ class RoomTypeSchema(BaseModel):
     id: int
     name: str
     description: Optional[str] = None
-    theme_color: Optional[str] = Field(None, pattern=r'^#[0-9A-Fa-f]{6}$')  # Hex color code
+    theme_color: Optional[str] = None # Hex color code
 
     class Config:
         from_attributes = True  
@@ -175,13 +170,11 @@ class RoomTypeSchema(BaseModel):
 class RoomTypeCreate(BaseModel):
     name: str = Field(..., max_length=50)
     description: Optional[str] = Field(None, max_length=200)
-    theme_color: Optional[str] = Field(None, pattern=r'^#[0-9A-Fa-f]{6}$')  # Hex color code
 
 
 class RoomTypeUpdate(BaseModel):
     name: Optional[str] = Field(None, max_length=50)
     description: Optional[str] = Field(None, max_length=200)
-    theme_color: Optional[str] = Field(None, pattern=r'^#[0-9A-Fa-f]{6}$')  # Hex color code  
 
 
 class TenantBase(BaseSchema):

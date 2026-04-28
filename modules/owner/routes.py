@@ -93,6 +93,7 @@ def send_otp(
     )
 
 
+
 @auth_router.post("/verify-otp", response_model=LoginResponse)
 def verify_otp_and_login(
     otp_verify: OTPVerify,
@@ -399,9 +400,10 @@ def create_room(
     room_type_id = None
     if room.room_type:
         room_type_obj = db.query(RoomType).filter(RoomType.name == room.room_type).first()
-        if not room_type_obj:
-            raise HTTPException(status_code=400, detail=f"Room type '{room.room_type}' not found")
-        room_type_id = room_type_obj.id
+        if room_type_obj:
+            room_type_id = room_type_obj.id
+        else:
+            room_type_id = db.query(RoomType).first()    
     
     # Create room data without room_type field, then add the ID
     room_data = room.model_dump()

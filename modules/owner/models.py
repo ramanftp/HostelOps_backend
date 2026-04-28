@@ -81,7 +81,6 @@ class RoomType(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(50), unique=True, nullable=False)
     description = Column(String(200), nullable=True)
-    theme_color = Column(String(7), nullable=True, default="#10B981")  # Hex color code
     
 
 class Room(Base):

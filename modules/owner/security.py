@@ -112,3 +112,4 @@ async def get_current_owner(
         "last_name": user.last_name,
         "owner": user
     }
+

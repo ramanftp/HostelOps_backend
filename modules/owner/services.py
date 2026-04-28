@@ -480,3 +480,4 @@ def process_aadhaar_image_bytes(image_bytes: bytes) -> Dict[str, str]:
     """Process Aadhaar image bytes and extract data"""
     text = extract_text_from_image_bytes(image_bytes)
     return parse_aadhaar_text(text)
+
