@@ -3,7 +3,7 @@ import uuid
 
 from sqlalchemy import UUID, Column, Integer, String, Boolean, DateTime, JSON, ForeignKey
 from sqlalchemy.sql import func
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import object_session, relationship
 from sqlalchemy.ext.hybrid import hybrid_property
 from datetime import datetime
 import enum
@@ -33,11 +33,20 @@ class Owner(Base):
     photo_url = Column(String(200), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
+    # subscription_id = Column(Integer,ForeignKey("subscriptions.id"), nullable=True)
+    # subscriptions = relationship("Subscriptions", back_populates="owner", cascade="all, delete-orphan")
 
     hostels = relationship("Hostel", back_populates="owner")
     expenses = relationship("Expense", back_populates="owner", cascade="all, delete-orphan")
 
 
+
+class Facility(Base):
+    __tablename__ = "facilities"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), unique=True, nullable=False)
+    description = Column(String(200), nullable=True)
 
 
 
@@ -75,13 +84,21 @@ class Hostel(Base):
     expenses = relationship("Expense", back_populates="hostel", cascade="all, delete-orphan")
 
 
+    @hybrid_property
+    def facilities_list(self):
+        session = object_session(self)
+        if not session:
+            return []
+        if self.facilities:
+                return session.query(Facility).filter(Facility.id.in_(self.facilities)).all()
+        return []
+
 class RoomType(Base):
     __tablename__ = "room_types"
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(50), unique=True, nullable=False)
     description = Column(String(200), nullable=True)
-    
 
 class Room(Base):
     __tablename__ = "rooms"
@@ -92,7 +109,7 @@ class Room(Base):
     room_type = Column(Integer, ForeignKey("room_types.id"), nullable=True)  # e.g., Single, Double, Dormitory
     no_of_beds = Column(Integer, nullable=True)
     theme_color = Column(String(7), nullable=True, default="#8B5CF6")  # Hex color code
-
+    facilities = Column(JSON, nullable=True)  # List of facilities in the room
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
 
@@ -103,13 +120,48 @@ class Room(Base):
     @hybrid_property
     def no_of_occupied_beds(self):
         # Count tenants in this room
+        
         from sqlalchemy.orm import object_session
         session = object_session(self)
         if session:
-            return session.query(Tenant).filter(Tenant.room_id == self.id).count()
+            return session.query(Tenant).filter(Tenant.room_id == self.id, Tenant.active == True).count()
         return 0
 
+    @hybrid_property
+    def hostel_facilities(self):
+        # Combine hostel and room facilities
+        hostel_facilities = self.hostel.facilities or []
+        session = object_session(self)
 
+        if not session or not self.hostel_id:
+            return []
+
+        facilities = session.query(Facility).filter(Facility.id.in_(hostel_facilities)).all() if hostel_facilities else []
+        list_of_facilities = []
+        for facility in facilities:
+            list_of_facilities.append({
+                "id": facility.id,
+                "name": facility.name,
+                "description": facility.description
+            })
+        return list_of_facilities
+    
+    @hybrid_property
+    def facilities_list(self):
+        session = object_session(self)
+        if not session:
+            return []
+        if self.facilities:
+            facilities = session.query(Facility).filter(Facility.id.in_(self.facilities)).all()
+            list_of_facilities = []
+            for facility in facilities:
+                list_of_facilities.append({
+                    "id": facility.id,
+                    "name": facility.name,
+                    "description": facility.description
+                })
+            return list_of_facilities
+        return []
 
 class Tenant(Base):
     __tablename__ = "tenants"
@@ -138,6 +190,9 @@ class Tenant(Base):
     zipcode = Column(String(20), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
+    organization = Column(String(100), nullable=True)
+    employee_id = Column(String(50), nullable=True)
+    active = Column(Boolean, default=True)
 
     hostel = relationship("Hostel", back_populates="tenants")
     room = relationship("Room", back_populates="tenants")

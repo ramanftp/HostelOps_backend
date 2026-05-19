@@ -1,6 +1,6 @@
 import enum
 
-from pydantic import BaseModel, Field, ConfigDict, validator
+from pydantic import BaseModel, Field, ConfigDict, json, validator
 from typing import Optional, List
 from datetime import datetime
 import re
@@ -83,6 +83,11 @@ class LoginResponse(BaseModel):
     owner: OwnerOut
 
 
+class FacilityMini(BaseModel):
+    id: int
+    name: str
+    description: Optional[str] = None
+
 # Hostel schemas
 class HostelBase(BaseSchema):
     name: str = Field(..., max_length=100)
@@ -100,7 +105,7 @@ class HostelBase(BaseSchema):
     bank_account_holder_name: Optional[str] = None
     upi_id: Optional[str] = None
     is_cash: Optional[bool] = True
-    facilities: Optional[List[str]] = None
+    facilities: Optional[List[int]] = []  # List of facility IDs for creation and updates
 
 class HostelCreate(HostelBase):
     pass
@@ -121,7 +126,7 @@ class HostelUpdate(BaseSchema):
     bank_account_holder_name: Optional[str] = None
     upi_id: Optional[str] = None
     is_cash: Optional[bool] = None
-    facilities: Optional[List[str]] = None
+    facilities: Optional[List[int]] = []
 
 class HostelOut(HostelBase):
     id: int
@@ -139,6 +144,7 @@ class RoomBase(BaseSchema):
 
 class RoomCreate(RoomBase):
     hostel_id: int
+    facilities: Optional[List[int]] = None
     room_type: Optional[int] = None  # Room type name for creation
 
 class RoomUpdate(BaseSchema):
@@ -153,10 +159,29 @@ class RoomOut(RoomBase):
     room_type_name: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+    no_of_occupied_beds: int
+    # facilities: Optional[List[]] = []
+    facilities_list: Optional[List[FacilityMini]] = []  # List of facilities in the room
+    hostel_facilities: Optional[List[FacilityMini]] = []  # Combined hostel and room facilities
 
 class RoomHostelImgOut(RoomOut):
     hostel_photos_urls: Optional[List[str]] = None
 
+class FacilityBase(BaseSchema):
+    name: str = Field(..., max_length=100)
+    description: Optional[str] = Field(None, max_length=200)
+
+
+class FacilityCreate(FacilityBase):
+    pass    
+class FacilityUpdate(BaseSchema):
+    id: int
+    name: Optional[str] = Field(None, max_length=100)
+    description: Optional[str] = Field(None, max_length=200)
+
+class FacilityOut(FacilityBase):
+    id: int
+    pass    
 class RoomTypeSchema(BaseModel):
     id: int
     name: str
@@ -197,10 +222,14 @@ class TenantBase(BaseSchema):
     state: Optional[str] = None
     country: Optional[str] = None
     zipcode: Optional[str] = None
+    organization: Optional[str] = None
+    employee_id: Optional[str] = None
+    active: Optional[bool] = True
+
 
 
 class TenantCreate(TenantBase):
-    room_id: Optional[int] = None
+    room_id: int
     hostel_id: Optional[int] = None
 
 
@@ -226,6 +255,9 @@ class TenantUpdate(BaseSchema):
     zipcode: Optional[str] = None
     room_id: Optional[int] = None
     hostel_id: Optional[int] = None
+    organization: Optional[str] = None
+    employee_id: Optional[str] = None
+    active: Optional[bool] = None
 
 
 class TenantOut(TenantBase):

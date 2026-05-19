@@ -49,3 +49,5 @@ class Transaction(Base):
 
     tenant = relationship("Tenant", back_populates="transactions")
     hostel = relationship("Hostel", back_populates="transactions")
+
+    

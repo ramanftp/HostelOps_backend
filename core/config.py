@@ -12,6 +12,13 @@ DATABASE_URL = os.getenv(
 )
 
 FIRE_BASE_CREDENTIALS_PATH = os.getenv("Firebase_Credentials_Path")
+MSG91_AUTH_KEY = os.getenv("MSG91_AUTH_KEY")
+MSG91_TEMPLATE_ID = os.getenv("MSG91_TEMPLATE_ID")
+MSG91_SENDER_ID = os.getenv("MSG91_SENDER_ID")
+
+RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID")
+RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET")
+
 
 SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret")
 auth_key = os.getenv("MSG91_AUTH_KEY")
@@ -30,7 +37,7 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     
     # Database
-    DATABASE_URL: str = "sqlite:///./hostel.db"
+    DATABASE_URL: str = "postgresql+psycopg://postgres:postgres@localhost:5432/hostel"
     
     # Security
     SECRET_KEY: str = "your-secret-key-change-in-production"
@@ -51,6 +58,9 @@ class Settings(BaseSettings):
     
     # Google Cloud Vision API
     GOOGLE_CLOUD_CREDENTIALS_PATH: Optional[str] = None
+
+    RAZORPAY_KEY_ID: str
+    RAZORPAY_KEY_SECRET: str
 
     # Upload storage configuration
     UPLOAD_BASE_DIR: str = "modules/static/uploads"

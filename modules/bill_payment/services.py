@@ -1,6 +1,6 @@
 from typing import List, Optional
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, func
+from sqlalchemy import and_, desc, func
 from datetime import datetime
 
 from .models import Bill, Transaction
@@ -25,6 +25,8 @@ def get_bill(db: Session, bill_id: int) -> Optional[Bill]:
 def create_bill(db: Session, bill: BillCreate) -> Bill:
     """Create a new bill"""
     db_bill = Bill(**bill.model_dump())
+    bill_number = generate_bill_number(db)
+    db_bill.bill_number = bill_number
     db.add(db_bill)
     db.commit()
     db.refresh(db_bill)
@@ -99,6 +101,21 @@ def create_transaction(db: Session, transaction: TransactionCreate) -> Transacti
     _reconcile_bill_status(db, db_transaction.bill_id)
     return db_transaction
 
+def generate_bill_number(db: Session):
+    now = datetime.now()
+    prefix = f"BILL-{now.strftime('%Y%m')}"
+
+    last_bill = db.query(Bill).filter(
+        Bill.bill_number.like(f"{prefix}%")
+    ).order_by(desc(Bill.id)).first()
+
+    if last_bill:
+        last_seq = int(last_bill.bill_number.split("-")[-1])
+        next_seq = last_seq + 1
+    else:
+        next_seq = 1
+
+    return f"{prefix}-{next_seq:04d}"
 
 def update_transaction(db: Session, transaction_id: int, transaction_update: TransactionUpdate) -> Optional[Transaction]:
 

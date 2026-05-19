@@ -6,13 +6,14 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.staticfiles import StaticFiles
 
 import logging
+import os
 
 from sqlalchemy import inspect
 
 from modules.owner.routes import router, auth_router
 from modules.bill_payment.routes import router as bill_router
 from modules.expenses.routes import router as expense_router
-from core.fcm_notification.routes import router as token_router
+from modules.fcm_notification.routes import router as token_router
 from core.database import SessionLocal
 
 from core.config import DATABASE_URL
@@ -20,6 +21,7 @@ from core.config import DATABASE_URL
 import firebase_admin
 from firebase_admin import credentials
 from core.config import settings
+from modules.subcriptions import subscriptions_router
 cred = credentials.Certificate(settings.FIRE_BASE_CREDENTIALS_PATH)
 
 
@@ -27,8 +29,15 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="HostelOps API", version="1.0.0")
 
-# Mount static files for uploaded images
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+# Ensure upload base directory exists
+os.makedirs(settings.UPLOAD_BASE_DIR, exist_ok=True)
+
+# Mount static files for uploaded images using configured base directory
+app.mount(settings.UPLOAD_URL_BASE, StaticFiles(directory=settings.UPLOAD_BASE_DIR), name="uploads")
+
+# Also mount old uploads directory for backward compatibility
+os.makedirs("uploads", exist_ok=True)
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads_legacy")
 
 
 firebase_admin.initialize_app(cred)
@@ -49,7 +58,7 @@ def root():
         "message": "HostelOps API is running"
     })
 
-
+app.include_router(subscriptions_router)  # Include subscriptions router
 app.include_router(auth_router)
 app.include_router(router)
 app.include_router(bill_router)

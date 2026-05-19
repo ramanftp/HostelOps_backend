@@ -7,15 +7,21 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from psycopg import Transaction
 from sqlalchemy.orm import Session
 
+from core.celery.task import generate_monthly_bills
 from core.database import get_db
+from modules.bill_payment.email_templates import generate_bill_pdf
 from modules.owner.security import get_current_owner
 from modules.owner.models import Hostel, Tenant
 
 from . import services
 from .schema import (
-    BillCreate, BillOtp, BillUpdate, BillOut,
+    BillCreate, BillOtp, BillUpdate, BillOut, ReminderRequest,
     TransactionCreate, TransactionUpdate, TransactionOut
 )
+
+from fastapi.responses import StreamingResponse
+from email.message import EmailMessage
+import smtplib
 
 router = APIRouter(prefix="/owner/bills", tags=["Bills"])
 
@@ -538,4 +544,197 @@ def verify_cash_payment_otp(
         "transaction_id": new_txn.id,
         "status": "verified",
         "bill_status": "paid"
+    }
+
+@router.post("/run-bills")
+def run_bills():
+    
+    generate_monthly_bills()
+    return {"message": "Bill generation started"}
+
+
+
+
+@router.get("/download-bill/{bill_id}")
+def download_bill(
+    bill_id: int,
+    current_owner: dict = Depends(get_current_owner),
+    db: Session = Depends(get_db)
+):
+    # Get bill
+    bill = services.get_bill(db, bill_id)
+
+    if not bill:
+        raise HTTPException(
+            status_code=404,
+            detail="Bill not found"
+        )
+
+    # Ownership check
+    hostel = db.query(Hostel).filter(
+        Hostel.id == bill.hostel_id,
+        Hostel.owner_id == current_owner["id"]
+    ).first()
+
+    if not hostel:
+        raise HTTPException(
+            status_code=403,
+            detail="Unauthorized"
+        )
+
+    # Generate PDF
+    pdf_buffer = generate_bill_pdf(
+        bill=bill,
+        tenant=bill.tenant,
+        hostel=bill.hostel
+    )
+
+    filename = f"{bill.bill_number}.pdf"
+
+    return StreamingResponse(
+        pdf_buffer,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename={filename}"
+        }
+    )
+
+SMTP_HOST = "smtp.gmail.com"
+SMTP_PORT = 587
+SMTP_USER = "anmol.mishra@ftprotech.com"
+SMTP_PASS = "dvywyerwvvshajkz"  # Use environment variables in production!
+
+@router.post("/send-bill-email/{bill_id}")
+def send_bill_email(
+    bill_id: int,
+    current_owner: dict = Depends(get_current_owner),
+    db: Session = Depends(get_db)
+):
+
+    # Get bill
+    bill = services.get_bill(db, bill_id)
+
+    if not bill:
+        raise HTTPException(
+            status_code=404,
+            detail="Bill not found"
+        )
+
+    # Ownership check
+    hostel = db.query(Hostel).filter(
+        Hostel.id == bill.hostel_id,
+        Hostel.owner_id == current_owner["id"]
+    ).first()
+
+    if not hostel:
+        raise HTTPException(
+            status_code=403,
+            detail="Unauthorized"
+        )
+
+    tenant = bill.tenant
+
+    if not tenant.email:
+        raise HTTPException(
+            status_code=400,
+            detail="Tenant email not available"
+        )
+
+    # -----------------------------------
+    # Generate PDF
+    # -----------------------------------
+    pdf_buffer = generate_bill_pdf(
+        bill=bill,
+        tenant=tenant,
+        hostel=hostel
+    )
+
+    pdf_bytes = pdf_buffer.getvalue()
+
+    # -----------------------------------
+    # Email Message
+    # -----------------------------------
+    msg = EmailMessage()
+
+    msg["Subject"] = f"Bill Invoice - {bill.bill_number}"
+    msg["From"] = SMTP_USER
+    msg["To"] = tenant.email
+
+    msg.set_content(
+        f"""
+Hello {tenant.name},
+
+Your new hostel bill has been generated.
+
+Bill Number: {bill.bill_number}
+Amount: ₹{bill.amount}
+Due Date: {bill.due_date.strftime('%d-%m-%Y')}
+
+Please find attached PDF invoice.
+
+Thank you,
+{hostel.name}
+"""
+    )
+
+    # Attach PDF
+    msg.add_attachment(
+        pdf_bytes,
+        maintype="application",
+        subtype="pdf",
+        filename=f"{bill.bill_number}.pdf"
+    )
+
+    # -----------------------------------
+    # Send Email
+    # -----------------------------------
+    try:
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+            server.starttls()
+            server.login(SMTP_USER, SMTP_PASS)
+            server.send_message(msg)
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
+
+    return {
+        "message": "Bill email sent successfully",
+        "email": tenant.email
+    }
+
+
+
+
+from twilio.rest import Client
+
+
+
+
+client = Client(ACCOUNT_SID, AUTH_TOKEN)
+
+
+@router.post("/send-reminder")
+def send_reminder(data: ReminderRequest):
+
+    variables = json.dumps({
+        "1": data.owner_name,
+        "2": data.tenant_name,
+        "3": data.room_no,
+        "4": data.pg_name,
+        "5": str(data.amount)
+    })
+
+    message = client.messages.create(
+        from_='whatsapp:+14155238886',
+        to=f'whatsapp:{data.phone}',
+        content_sid="HX1e2486cd1a8f742c880a665dcf318c24",
+        content_variables=variables
+    )
+
+    return {
+        "status": "sent",
+        "sid": message.sid
     }

@@ -10,8 +10,10 @@ from sqlalchemy import select, or_
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
+from modules.bill_payment.models import Bill
+
 from .schemas import OwnerCreate
-from .models import Owner
+from .models import Owner, Tenant
 from core.config import settings
 
 import logging
@@ -481,3 +483,74 @@ def process_aadhaar_image_bytes(image_bytes: bytes) -> Dict[str, str]:
     text = extract_text_from_image_bytes(image_bytes)
     return parse_aadhaar_text(text)
 
+
+
+def create_bill_for_new_tenant(db: Session, tenant: Tenant) -> Bill:
+    """Create a bill for a new tenant"""
+    from modules.bill_payment.models import Bill
+    bill_number = f"BILL-{uuid.uuid4().hex[:8].upper()}"
+    amount = tenant.rent + (tenant.security_deposit or 0) if tenant.rent else 0
+    new_bill = Bill(
+        tenant_id=tenant.id,
+        hostel_id=tenant.hostel_id,
+        amount=amount,
+        due_date=datetime.utcnow() + timedelta(days=7),
+        bill_number=bill_number,
+        status="pending"
+    )
+    db.add(new_bill)
+    db.commit()
+    db.refresh(new_bill)
+    return new_bill
+
+# Tenant management functions
+
+def get_tenant_by_phone(db: Session, phone_number: str) -> Optional[Tenant]:
+    """Get tenant by phone number"""
+    normalized_phone = normalize_phone(phone_number)
+    tenant = db.execute(
+        select(Tenant).where(Tenant.phone_number == normalized_phone)
+    ).scalar_one_or_none()
+    return tenant
+
+
+def authenticate_tenant_with_otp(
+    db: Session, 
+    phone_number: str, 
+    otp: str,
+    ip_address: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Authenticate tenant with phone and OTP
+    Returns tenant and flag indicating if tenant is new
+    """
+    try:
+        normalized_phone = normalize_phone(phone_number)
+        tenant = get_tenant_by_phone(db, normalized_phone)
+        if not tenant:
+            raise UserNotFoundError("Tenant not found")
+        
+        # Verify OTP for tenants
+        verify_otp(normalized_phone, otp, "tenant_login")
+
+        # # Update login info
+        # tenant.last_login_at = datetime.utcnow()
+        # if ip_address:
+        #     tenant.last_login_ip = ip_address
+
+        db.commit()
+        db.refresh(tenant)
+
+        return {
+            "tenant": tenant
+        }
+        
+    except InvalidOTPError:
+        raise
+    except Exception as e:
+        logger.error(f"Tenant OTP authentication error: {e}")
+        raise AuthServiceError("Authentication failed")
+    
+def get_current_tenant(db: Session, tenant_id: int) -> Optional[Tenant]:
+    """Get current tenant by ID"""
+    return db.get(Tenant, tenant_id)

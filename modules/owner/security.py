@@ -113,3 +113,45 @@ async def get_current_owner(
         "owner": user
     }
 
+def get_current_tenant(token: str = Depends(security), db: Session = Depends(get_db)):
+    """Get current tenant from token"""
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    
+    if not token:
+        raise credentials_exception
+    
+    # Verify token
+    payload = verify_token(token)
+    if not payload:
+        raise credentials_exception
+    
+    phone_number: str = payload.get("sub")
+    tenant_id: int = payload.get("tenant_id")
+    
+    if not phone_number or not tenant_id:
+        raise credentials_exception
+    
+    # Get tenant from database
+    tenant = services.get_current_tenant(db, tenant_id)
+    if not tenant:
+        raise credentials_exception
+    
+    # Check if tenant is active
+    if tenant.status != "active":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Tenant account is inactive"
+        )
+    
+    # Return tenant info with roles
+    return {
+        "id": tenant.id,
+        "phone_number": tenant.phone_number,
+        "email": tenant.email,
+        "name": tenant.name,
+        "tenant": tenant
+    }

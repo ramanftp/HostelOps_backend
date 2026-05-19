@@ -1,21 +1,22 @@
 from datetime import datetime, timedelta
 import logging
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request, UploadFile, File
 from fastapi.responses import HTMLResponse
 from requests import session
-from sqlalchemy import Transaction, func
-from sqlalchemy.orm import Session
+from sqlalchemy import Transaction, and_, func
+from sqlalchemy.orm import Query, Session
 
 from core.config import settings
 from core.database import get_db
+from modules.bill_payment.schema import BillOut
 from modules.owner import services
-from modules.owner.models import Owner, Hostel, Room, RoomType, Tenant
-from modules.bill_payment.models import Transaction as BillTransaction
+from modules.owner.models import Facility, Owner, Hostel, Room, RoomType, Tenant
+from modules.bill_payment.models import Bill, Transaction as BillTransaction
 from modules.expenses.models import Expense
 from modules.owner.schemas import (
-    OTPRequest, OTPVerify, OTPResponse, LoginResponse,
+    FacilityCreate, FacilityOut, OTPRequest, OTPVerify, OTPResponse, LoginResponse,
     HostelCreate, HostelUpdate, HostelOut, OwnerCreate, OwnerUpdate, OwnerOut, OwnerdetailHostelRoomOut,
     RoomCreate, RoomHostelImgOut, RoomTypeSchema, RoomTypeCreate, RoomTypeUpdate, RoomUpdate, RoomOut,
     TenantCreate, TenantUpdate, TenantOut, AadhaarData
@@ -27,17 +28,6 @@ from modules.owner.security import create_access_token, ACCESS_TOKEN_EXPIRE_MINU
 auth_router = APIRouter(prefix="/auth", tags=["Authentication"])
 router = APIRouter(prefix="/owner", tags=["Owner"])
 
-
-room_types = {  
-    "1": "Single Room",
-    "2": "2 Share Room",
-    "3": "3 Share Room",
-    "4": "4 Share Room",
-    "5": "5 Share Room",
-    "flat": "Flat",
-    "rental": "Rental",
-    "other": "Other"
-}
 
 logger = logging.getLogger(__name__)
 # Helper function for error handling
@@ -79,12 +69,12 @@ def send_otp(
 ):
     """Send OTP to phone number for login/registration"""
     # verify user exists or create a new one (without committing yet)
-    # Owner = services.get_user_by_phone(db, otp_request.phone_number)
-    # if not Owner:
-    #     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Owner not found. Please register first.")
+    Owner = services.get_owner_by_phone(db, otp_request.phone_number)
+    if not Owner:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Owner not found. Please register first.")
 
     result = services.send_otp(
-        otp_request.phone_number, 
+        otp_request.phone_number
     )
     return OTPResponse(  
         ok=True,
@@ -399,7 +389,7 @@ def create_room(
     # Convert room type name to ID if provided
     room_type_id = None
     if room.room_type:
-        room_type_obj = db.query(RoomType).filter(RoomType.name == room.room_type).first()
+        room_type_obj = db.query(RoomType).filter(RoomType.id == room.room_type).first()
         if room_type_obj:
             room_type_id = room_type_obj.id
         else:
@@ -505,7 +495,7 @@ def get_tenants(
     db: Session = Depends(get_db)
 ):
     """Get all tenants for the current owner"""
-    tenants = db.query(Tenant).join(Hostel).filter(Hostel.owner_id == current_owner["id"]).all()
+    tenants = db.query(Tenant).join(Hostel).filter(Hostel.owner_id == current_owner["id"], Tenant.active == True).all()
     return tenants
 
 
@@ -522,7 +512,7 @@ def get_tenants_by_hostel(
     ).first()
     if not hostel:
         raise HTTPException(status_code=404, detail="Hostel not found")
-    tenants = db.query(Tenant).filter(Tenant.hostel_id == hostel_id).all()
+    tenants = db.query(Tenant).filter(Tenant.hostel_id == hostel_id, Tenant.active == True).all()
     return tenants
 
 
@@ -540,17 +530,18 @@ def create_tenant(
     ).first()
     if not hostel:
         raise HTTPException(status_code=404, detail="Hostel not found")
-    if tenant.room_id is not None:
-        room = db.query(Room).filter(
+
+    room = db.query(Room).filter(
             Room.id == tenant.room_id,
             Room.hostel_id == hostel_id
         ).first()
-        if not room:
-            raise HTTPException(status_code=404, detail="Room not found in hostel")
+    if not room:
+        raise HTTPException(status_code=404, detail="Room not found in hostel")
     db_tenant = Tenant(**tenant.model_dump(exclude={'hostel_id'}), hostel_id=hostel_id)
     db.add(db_tenant)
     db.commit()
     db.refresh(db_tenant)
+    create_bill = services.create_bill_for_new_tenant(db, db_tenant)
     return db_tenant
 
 
@@ -607,7 +598,7 @@ def get_tenants_by_room(
     ).first()
     if not room:
         raise HTTPException(status_code=404, detail="Room not found")
-    tenants = db.query(Tenant).filter(Tenant.room_id == room_id).all()
+    tenants = db.query(Tenant).filter(Tenant.room_id == room_id,Tenant.active == True).all()
     return tenants
 
 
@@ -620,6 +611,7 @@ def get_tenant(
     """Get a specific tenant"""
     tenant = db.query(Tenant).join(Hostel).filter(
         Tenant.id == tenant_id,
+        Tenant.active == True,
         Hostel.owner_id == current_owner["id"]
     ).first()
     if not tenant:
@@ -637,6 +629,7 @@ def update_tenant(
     """Update a tenant"""
     tenant = db.query(Tenant).join(Hostel).filter(
         Tenant.id == tenant_id,
+        Tenant.active == True,
         Hostel.owner_id == current_owner["id"]
     ).first()
     if not tenant:
@@ -669,7 +662,7 @@ def delete_tenant(
     ).first()
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
-    db.delete(tenant)
+    tenant.active = False  # Soft delete by marking as inactive
     db.commit()
     return {"message": "Tenant deleted successfully"}
 
@@ -681,7 +674,6 @@ def get_dashboard_data(
     db: Session = Depends(get_db),
 ):
     """Get dashboard data for the owner"""
-
     if hostel_id:
         hostel = db.query(Hostel).filter(
             Hostel.id == hostel_id,
@@ -696,13 +688,15 @@ def get_dashboard_data(
         expense_filter = Expense.hostel_id == hostel_id
 
     else:
-        # 🔥 IMPORTANT: filter by owner (you missed this earlier)
         hostel_ids = db.query(Hostel.id).filter(
             Hostel.owner_id == current_owner["id"]
         )
 
         room_filter = Room.hostel_id.in_(hostel_ids)
-        tenant_filter = Tenant.hostel_id.in_(hostel_ids)
+        tenant_filter =  and_(
+        Tenant.hostel_id.in_(hostel_ids),
+        Tenant.active.is_(True)
+    )
         expense_filter = Expense.hostel_id.in_(hostel_ids)
 
     # Filter expenses by owner
@@ -711,7 +705,10 @@ def get_dashboard_data(
     rooms_count = db.query(Room).filter(room_filter).count() or 0
     bed_count = db.query(func.sum(Room.no_of_beds)).filter(room_filter).scalar() or 0
     tenants_count = db.query(Tenant).filter(tenant_filter).count() or 0
-    total_amount = db.query(func.sum(Tenant.rent)).filter(tenant_filter).scalar() or 0
+    if not hostel_id:
+        total_amount = db.query(func.sum(Bill.amount)).filter(Bill.status != "paid", Bill.hostel_id.in_(hostel_ids)).scalar() or 0
+    else:
+        total_amount = db.query(func.sum(Bill.amount)).filter(Bill.status != "paid", Bill.hostel_id == hostel_id).scalar() or 0
     total_payments = db.query(func.sum(BillTransaction.amount))\
         .join(Tenant)\
         .filter(tenant_filter)\
@@ -731,7 +728,6 @@ def get_dashboard_data(
         "payment_due": payment_due
     }
 
-
 # ============================================================================
 # Image Upload Endpoints
 # ============================================================================
@@ -740,8 +736,15 @@ import os
 import shutil
 import uuid
 
-UPLOAD_DIR = "uploads"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
+from core.config import settings
+
+# Ensure upload directories exist
+os.makedirs(settings.owner_image_dir, exist_ok=True)
+os.makedirs(settings.tenant_image_dir, exist_ok=True)
+os.makedirs(settings.hostel_image_dir, exist_ok=True)
+
+# Also ensure old uploads directory exists for backward compatibility
+os.makedirs("uploads", exist_ok=True)
 
 @router.post("/upload-photo", tags=["Uploads"])
 async def upload_photo(
@@ -761,12 +764,12 @@ async def upload_photo(
 
     file_extension = os.path.splitext(file.filename)[1]
     unique_filename = f"{uuid.uuid4()}{file_extension}"
-    file_path = os.path.join(UPLOAD_DIR, unique_filename)
+    file_path = os.path.join(settings.owner_image_dir, unique_filename)
 
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
-    url = f"/uploads/{unique_filename}"
+    url = f"{settings.owner_image_url}/{unique_filename}"
     owner.photo_url = url
 
     db.commit()
@@ -795,12 +798,12 @@ async def upload_owner_photo(
 
     file_extension = os.path.splitext(file.filename)[1]
     unique_filename = f"{uuid.uuid4()}{file_extension}"
-    file_path = os.path.join(UPLOAD_DIR, unique_filename)
+    file_path = os.path.join(settings.owner_image_dir, unique_filename)
 
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
-    url = f"/uploads/{unique_filename}"
+    url = f"{settings.owner_image_url}/{unique_filename}"
     owner.photo_url = url
 
     db.commit()
@@ -829,12 +832,12 @@ async def upload_tenant_photo(
 
     file_extension = os.path.splitext(file.filename)[1]
     unique_filename = f"{uuid.uuid4()}{file_extension}"
-    file_path = os.path.join(UPLOAD_DIR, unique_filename)
+    file_path = os.path.join(settings.tenant_image_dir, unique_filename)
 
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
-    url = f"/uploads/{unique_filename}"
+    url = f"{settings.tenant_image_url}/{unique_filename}"
     tenant.photo_url = url
 
     db.commit()
@@ -865,12 +868,12 @@ async def upload_hostel_photos(
 
         file_extension = os.path.splitext(file.filename)[1]
         unique_filename = f"{uuid.uuid4()}{file_extension}"
-        file_path = os.path.join(UPLOAD_DIR, unique_filename)
+        file_path = os.path.join(settings.hostel_image_dir, unique_filename)
 
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
 
-        url = f"/uploads/{unique_filename}"
+        url = f"{settings.hostel_image_url}/{unique_filename}"
         urls.append(url)
 
     if hostel.photos_urls:
@@ -883,9 +886,159 @@ async def upload_hostel_photos(
 
     return {"urls": urls, "message": f"Uploaded {len(urls)} photos successfully"}
 
+@router.get("/facilities", tags=["Facilities"])
+def get_facilities(
+    db: Session = Depends(get_db)
+):
+    """Get list of predefined facilities"""
+    facilitys = db.query(Facility).all()
+    return facilitys
+
+
+
+
+@router.post("/facilities", tags=["Facilities"])
+def create_facility(
+    facility: FacilityCreate,
+    db: Session = Depends(get_db),
+):
+    """Create a new facility"""
+
+    db_facility = Facility(**facility.model_dump())
+
+    db.add(db_facility)
+    db.commit()
+    db.refresh(db_facility)
+
+    return db_facility
+@router.delete("/facilities/{facility_id}", tags=["Facilities"])
+def delete_facility(
+    facility_id: str,
+    db: Session = Depends(get_db)
+):
+    """Delete a facility (admin only)"""
+    # This endpoint can be implemented to allow admins to remove facilities
+    db_facility = db.query(services.Facility).filter(services.Facility.id == facility_id).first()
+    if not db_facility:
+        raise HTTPException(status_code=404, detail="Facility not found")
+    db.delete(db_facility)
+    db.commit()
+    return {"message": "Facility deleted successfully"} 
 
 # Include auth router
 # router.include_router(auth_router)
 
 
 
+# TENANT MANAGEMENT ENDPOINTS
+
+
+tenant = APIRouter(prefix="/tenant", tags=["Tenant"])
+
+
+@auth_router.post("/tenant/send-otp", response_model=OTPResponse, tags=["Tenant Authentication"])
+def send_tenant_otp(
+    otp_request: OTPRequest,
+    db: Session = Depends(get_db)
+):
+    """Send OTP to tenant's phone number for login/verification"""
+    tenant = services.get_tenant_by_phone(db, otp_request.phone_number)
+    if not tenant:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found. Please contact owner.")
+    
+    result = services.send_otp(
+        otp_request.phone_number
+    )
+    return OTPResponse(  
+        ok=True,
+        message=result["message"],
+        expires_in=result["expires_in"]
+    )
+
+
+@auth_router.post("/tenant/verify-otp", response_model=LoginResponse, tags=["Tenant Authentication"])
+def verify_tenant_otp_and_login(
+    otp_verify: OTPVerify,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """Verify tenant OTP and login, returning access token"""
+    try:
+        auth_result = services.authenticate_tenant_with_otp(
+            db, 
+            otp_verify.phone_number, 
+            otp_verify.otp,
+            request.client.host
+        )
+        
+        tenant = auth_result["tenant"]
+        
+        access_token = create_access_token(
+            subject=tenant.phone_number,
+            extra_data={
+                "tenant_id": tenant.id,
+                "hostel_id": tenant.hostel_id
+            }
+        )
+        
+        return LoginResponse(
+            access_token=access_token,
+            token_type="bearer",
+            expires_in=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+            tenant=tenant
+        )
+        
+    except services.InvalidOTPError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except services.UserNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except services.AccountLockedError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+
+@auth_router.post("/tenant/logout", tags=["Tenant Authentication"])
+def tenant_logout():
+    """Logout tenant (client should discard token)"""
+    return {"message": "Successfully logged out"}
+
+from .security import get_current_tenant
+@tenant.get("/me", response_model=TenantOut, tags=["Tenant"])
+def get_current_tenant(current_tenant: dict = Depends(get_current_tenant)):
+    """Get current tenant profile"""
+    return current_tenant
+
+@tenant.get("/MyPG", response_model=TenantOut, tags=["Tenant"])   
+def get_tenant_pg(current_tenant: dict = Depends(get_current_tenant), db: Session = Depends(get_db)):
+    """Get the PG/Hostel details of the tenant"""
+
+    hostel = db.query(Hostel).filter(Hostel.id == current_tenant["hostel_id"]).first()
+    if not hostel:
+        raise HTTPException(status_code=404, detail="Hostel not found")
+    return hostel
+
+@tenant.get("/MyBills", response_model=List[BillOut], tags=["Tenant"])
+def get_tenant_bills(current_tenant: dict = Depends(get_current_tenant), db: Session = Depends(get_db)):
+    """Get all bills for the tenant"""
+    bills = db.query(Bill).filter(Bill.tenant_id == current_tenant["tenant_id"]).all()
+    return bills
+
+@tenant.post("/pay-bill/{bill_id}", tags=["Tenant"])
+def pay_bill(
+    bill_id: int,
+    current_tenant: dict = Depends(get_current_tenant),
+    db: Session = Depends(get_db)
+):
+    """Pay a specific bill"""
+    bill = db.query(Bill).filter(Bill.id == bill_id, Bill.tenant_id == current_tenant["tenant_id"]).first()
+    if not bill:
+        raise HTTPException(status_code=404, detail="Bill not found")
+    if bill.status == "paid":
+        raise HTTPException(status_code=400, detail="Bill is already paid")
+    
+    # Here you would integrate with a payment gateway to process the payment
+    # For this example, we'll just mark it as paid
+    bill.status = "paid"
+    db.commit()
+    db.refresh(bill)
+    
+    return {"message": "Bill paid successfully", "bill": bill}

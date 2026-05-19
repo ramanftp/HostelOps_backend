@@ -70,3 +70,13 @@ class TransactionOut(TransactionBase):
 
 class BillOtp(BaseSchema):
     otp: str = Field(..., min_length=4, max_length=6)  
+
+
+
+class ReminderRequest(BaseModel):
+    phone: str
+    owner_name: str
+    tenant_name: str
+    room_no: str
+    pg_name: str
+    amount: str
