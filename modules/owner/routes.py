@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 import logging
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status, Request, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, status, Request, UploadFile, File, Body
 from fastapi.responses import HTMLResponse
 from requests import session
 from sqlalchemy import Transaction, and_, func
@@ -67,19 +67,46 @@ def send_otp(
     otp_request: OTPRequest,
     db: Session = Depends(get_db)
 ):
-    """Send OTP to phone number for login/registration"""
-    # verify user exists or create a new one (without committing yet)
+    """Send OTP to phone number for login"""
+    # verify user exists
     Owner = services.get_owner_by_phone(db, otp_request.phone_number)
     if not Owner:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Owner not found. Please register first.")
 
     result = services.send_otp(
-        otp_request.phone_number
+        otp_request.phone_number,
+        purpose="login"
     )
     return OTPResponse(  
         ok=True,
         message=result["message"],
-        expires_in=result["expires_in"]
+        expires_in=result["expires_in"],
+        debug_otp=result.get("debug_otp"),
+        sms_sent=result.get("sms_sent")
+    )
+
+
+@auth_router.post("/send-registration-otp", response_model=OTPResponse)
+def send_registration_otp(
+    otp_request: OTPRequest,
+    db: Session = Depends(get_db)
+):
+    """Send OTP to phone number for registration"""
+    # Check if user already exists
+    Owner = services.get_owner_by_phone(db, otp_request.phone_number)
+    if Owner:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Owner with this phone number already exists. Please login instead.")
+
+    result = services.send_otp(
+        otp_request.phone_number,
+        purpose="registration"
+    )
+    return OTPResponse(  
+        ok=True,
+        message=result["message"],
+        expires_in=result["expires_in"],
+        debug_otp=result.get("debug_otp"),
+        sms_sent=result.get("sms_sent")
     )
 
 
@@ -181,14 +208,29 @@ def delete_room_type(
     return {"message": "Room type deleted successfully"}
 
 
-@router.post("/register", response_model=OwnerOut, tags=["Owner"])
+@router.post("/register", response_model=LoginResponse, tags=["Owner"])
 def register_owner(
     owner_create: OwnerCreate,
+    request: Request,
     db: Session = Depends(get_db)
 ):
-    """Register a new owner"""
-    result = handle_service_error(db, services.register_owner, db, owner_create)
-    return result
+    """Register a new owner with OTP verification and auto-login"""
+    owner = handle_service_error(db, services.register_owner, db, owner_create)
+    
+    # Create access token for auto-login
+    access_token = create_access_token(
+        subject=owner.phone_number,
+        extra_data={
+            "owner_id": owner.id,
+        }
+    )
+    
+    return LoginResponse(
+        access_token=access_token,
+        token_type="bearer",
+        expires_in=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        owner=owner
+    )
 
 
 @router.get("/owners", response_model=List[OwnerOut], tags=["Owner"])
@@ -885,6 +927,49 @@ async def upload_hostel_photos(
     db.refresh(hostel)
 
     return {"urls": urls, "message": f"Uploaded {len(urls)} photos successfully"}
+
+@router.delete("/upload/hostel/{hostel_id}/photos", tags=["Uploads"])
+def delete_hostel_photos(
+    hostel_id: int,
+    photo_urls: List[str] = Body(...),
+    current_owner: dict = Depends(get_current_owner),
+    db: Session = Depends(get_db)
+):
+    """Delete one or more hostel photos and remove them from storage"""
+    hostel = db.query(Hostel).filter(
+        Hostel.id == hostel_id,
+        Hostel.owner_id == current_owner["id"]
+    ).first()
+    if not hostel:
+        raise HTTPException(status_code=404, detail="Hostel not found")
+
+    if not hostel.photos_urls:
+        raise HTTPException(status_code=400, detail="Hostel has no photos to delete")
+
+    deleted_urls = []
+    remaining_urls = []
+
+    for url in hostel.photos_urls:
+        if url in photo_urls:
+            filename = os.path.basename(url)
+            if filename:
+                file_path = os.path.join(settings.hostel_image_dir, filename)
+                if os.path.exists(file_path):
+                    try:
+                        os.remove(file_path)
+                        deleted_urls.append(url)
+                    except OSError:
+                        remaining_urls.append(url)
+                else:
+                    deleted_urls.append(url)
+        else:
+            remaining_urls.append(url)
+
+    hostel.photos_urls = remaining_urls
+    db.commit()
+    db.refresh(hostel)
+
+    return {"deleted_urls": deleted_urls, "photos_urls": hostel.photos_urls}
 
 @router.get("/facilities", tags=["Facilities"])
 def get_facilities(

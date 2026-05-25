@@ -104,8 +104,11 @@ def get_owner_by_phone(db: Session, phone_number: str) -> Optional[Owner]:
     return owner
 
 def register_owner(db: Session, owner_create: OwnerCreate) -> Owner:
-    """Register a new owner"""
+    """Register a new owner with OTP verification"""
     normalized_phone = normalize_phone(owner_create.phone_number)
+    
+    # Verify OTP first
+    verify_otp(normalized_phone, owner_create.otp, "registration")
     
     # Check if phone or email already exists
     existing_owner = db.execute(
@@ -124,7 +127,14 @@ def register_owner(db: Session, owner_create: OwnerCreate) -> Owner:
         phone_number=normalized_phone,
         first_name=owner_create.first_name,
         last_name=owner_create.last_name,
-        email=owner_create.email
+        email=owner_create.email,
+        area=owner_create.area,
+        street_1=owner_create.street_1,
+        street_2=owner_create.street_2,
+        city=owner_create.city,
+        state=owner_create.state,
+        country=owner_create.country,
+        zipcode=owner_create.zipcode
     )
     
     db.add(new_owner)
@@ -489,7 +499,16 @@ def create_bill_for_new_tenant(db: Session, tenant: Tenant) -> Bill:
     """Create a bill for a new tenant"""
     from modules.bill_payment.models import Bill
     bill_number = f"BILL-{uuid.uuid4().hex[:8].upper()}"
-    amount = tenant.rent + (tenant.security_deposit or 0) if tenant.rent else 0
+    amount = tenant.rent if tenant.rent else 0
+    new_deposit = Bill(
+        tenant_id=tenant.id,
+        hostel_id=tenant.hostel_id,
+        amount=tenant.deposit if tenant.deposit else 0,
+        due_date=datetime.utcnow() + timedelta(days=7),
+        bill_number=f"DEP-{uuid.uuid4().hex[:8].upper()}",
+        status="pending",
+        description="Security Deposit"
+    )
     new_bill = Bill(
         tenant_id=tenant.id,
         hostel_id=tenant.hostel_id,
@@ -498,6 +517,7 @@ def create_bill_for_new_tenant(db: Session, tenant: Tenant) -> Bill:
         bill_number=bill_number,
         status="pending"
     )
+    db.add(new_deposit)
     db.add(new_bill)
     db.commit()
     db.refresh(new_bill)

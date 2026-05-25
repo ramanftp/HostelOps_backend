@@ -14,6 +14,7 @@ from modules.owner.routes import router, auth_router
 from modules.bill_payment.routes import router as bill_router
 from modules.expenses.routes import router as expense_router
 from modules.fcm_notification.routes import router as token_router
+from modules.complaints.routes import router as complaint_router
 from core.database import SessionLocal
 
 from core.config import DATABASE_URL
@@ -64,6 +65,7 @@ app.include_router(router)
 app.include_router(bill_router)
 app.include_router(expense_router)
 app.include_router(token_router)  # Include FCM notification router
+app.include_router(complaint_router)  # Include complaints router
 
 
 

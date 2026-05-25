@@ -711,8 +711,6 @@ Thank you,
 from twilio.rest import Client
 
 
-
-
 client = Client(ACCOUNT_SID, AUTH_TOKEN)
 
 

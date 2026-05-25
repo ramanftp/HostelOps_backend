@@ -22,6 +22,8 @@ from core.database import Base
 from modules.owner import models
 from modules.bill_payment import models as bill_models
 from modules.expenses import models as expense_models
+from modules.fcm_notification import models as fcm_models
+from modules.complaints import models as complaint_models
 target_metadata = Base.metadata
 
 # other values from the config, defined by the needs of env.py,

@@ -28,7 +28,7 @@ class OwnerBase(BaseSchema):
     photo_url: Optional[str] = None
 
 class OwnerCreate(OwnerBase):
-    pass
+    otp: str = Field(..., min_length=4, max_length=6)
 
 class OwnerUpdate(BaseSchema):
     first_name: Optional[str] = None
