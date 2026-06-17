@@ -13,7 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from modules.bill_payment.models import Bill
 
 from .schemas import OwnerCreate
-from .models import Owner, Tenant
+from .models import Owner, Tenant, Manager
 from core.config import settings
 
 import logging
@@ -69,13 +69,13 @@ class AccountLockedError(AuthServiceError):
 def normalize_phone(phone: str) -> str:
     """Normalize phone number to E.164 format"""
     # # Remove all non-digit characters
-    # digits = re.sub(r"\D", "", phone)
+    digits = re.sub(r"\D", "", phone)
     
     # # If it's a 10-digit Indian number, add +91
     # if len(digits) == 10:
     #     return f"+91{digits}"
     
-    # # If it's 12 digits and starts with 91, add +
+    # If it's 12 digits and starts with 91, add +
     # if len(digits) == 12 and digits.startswith("91"):
     #     return f"+{digits}"
     
@@ -103,14 +103,21 @@ def get_owner_by_phone(db: Session, phone_number: str) -> Optional[Owner]:
     ).scalar_one_or_none()
     return owner
 
+
+def get_manager_by_phone(db: Session, phone_number: str) -> Optional[Manager]:
+    """Get manager by phone number"""
+    normalized_phone = normalize_phone(phone_number)
+    manager = db.execute(
+        select(Manager).where(Manager.phone_number == normalized_phone)
+    ).scalar_one_or_none()
+    return manager
+
+
 def register_owner(db: Session, owner_create: OwnerCreate) -> Owner:
     """Register a new owner with OTP verification"""
     normalized_phone = normalize_phone(owner_create.phone_number)
     
-    # Verify OTP first
-    verify_otp(normalized_phone, owner_create.otp, "registration")
-    
-    # Check if phone or email already exists
+
     existing_owner = db.execute(
         select(Owner).where(
             or_(
@@ -327,9 +334,11 @@ def authenticate_with_otp(
     """
     try:
         normalized_phone = normalize_phone(phone_number)
-        user = get_owner_by_phone(db, normalized_phone)
+        user = get_manager_by_phone(db, normalized_phone)
         if not user:
-            raise UserNotFoundError("Owner not found")
+            user = get_owner_by_phone(db, normalized_phone)
+        if not user:
+            raise UserNotFoundError("User not found")
         
         # Verify OTP for all users including admin
         verify_otp(normalized_phone, otp, "login")
@@ -350,7 +359,9 @@ def authenticate_with_otp(
     except InvalidOTPError:
         # Track failed attempt if user exists
         normalized_phone = normalize_phone(phone_number)
-        user = get_owner_by_phone(db, phone_number)
+        user = get_manager_by_phone(db, normalized_phone)
+        if not user:
+            user = get_owner_by_phone(db, normalized_phone)
         
         # if user:
         #     user.failed_otp_attempts += 1
@@ -446,7 +457,7 @@ def parse_aadhaar_text(text: str) -> Dict[str, str]:
     # Aadhar Number
     for line in lines:
         if re.search(r'\d{4}\s\d{4}\s\d{4}', line):
-            data["aadhaar_no"] = line.replace(" ", "")
+            data["aadhaar_no"] = line
 
     # DOB
     for line in lines:
@@ -551,7 +562,7 @@ def authenticate_tenant_with_otp(
             raise UserNotFoundError("Tenant not found")
         
         # Verify OTP for tenants
-        verify_otp(normalized_phone, otp, "tenant_login")
+        verify_otp(normalized_phone, otp, "login")
 
         # # Update login info
         # tenant.last_login_at = datetime.utcnow()
@@ -574,3 +585,14 @@ def authenticate_tenant_with_otp(
 def get_current_tenant(db: Session, tenant_id: int) -> Optional[Tenant]:
     """Get current tenant by ID"""
     return db.get(Tenant, tenant_id)
+
+
+def create_manager(db: Session, manager_data: Dict[str, Any], owner_id: int) -> None:
+    """Create a manager for the owner"""
+    from .models import Manager
+    # new_manager = Manager(owner_id=owner_id, **manager_data.model_dump())
+    new_manager = Manager(**manager_data.model_dump())
+    db.add(new_manager)
+    db.commit()
+    db.refresh(new_manager)
+    return new_manager

@@ -15,7 +15,7 @@ from core.database import Base
 class Owner(Base):
     __tablename__ = "owners"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     phone_number = Column(String(20), unique=True, nullable=False)
     first_name = Column(String(50), nullable=True)
     last_name = Column(String(50), nullable=True)
@@ -33,8 +33,12 @@ class Owner(Base):
     photo_url = Column(String(200), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
-    # subscription_id = Column(Integer,ForeignKey("subscriptions.id"), nullable=True)
-    # subscriptions = relationship("Subscriptions", back_populates="owner", cascade="all, delete-orphan")
+    subscription_id = Column(Integer,nullable=True)
+    # is_owner = Column(Boolean, default=True)
+    subscriptions = relationship("Subscriptions",
+                                 back_populates="owner",
+                                 cascade="all, delete-orphan"
+                                 )
 
     hostels = relationship("Hostel", back_populates="owner")
     expenses = relationship("Expense", back_populates="owner", cascade="all, delete-orphan")
@@ -49,11 +53,17 @@ class Facility(Base):
     description = Column(String(200), nullable=True)
 
 
+class Category(Base):
+    __tablename__ = "categories"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    name = Column(String(50), unique=True, nullable=False)
+
 
 class Hostel(Base):
     __tablename__ = "hostels"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     owner_id = Column(Integer, ForeignKey("owners.id"), nullable=False)
     name = Column(String(100), nullable=False)
     description = Column(String(500), nullable=True)
@@ -70,7 +80,8 @@ class Hostel(Base):
     bank_name = Column(String(100), nullable=True)
     bank_account_holder_name = Column(String(100), nullable=True)   
     upi_id = Column(String(100), nullable=True)
-    category = Column(String(20), nullable=True)  # women, men, coliving...
+    # category = Column(String(20), nullable=True)  # women, men, coliving...
+    category = Column(Integer, ForeignKey("categories.id"), nullable=True)
     is_cash = Column(Boolean, default=True)
     facilities = Column(JSON, nullable=True)  # List of facilities
     theme_color = Column(String(7), nullable=True, default="#3B82F6")  # Hex color code
@@ -96,14 +107,14 @@ class Hostel(Base):
 class RoomType(Base):
     __tablename__ = "room_types"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     name = Column(String(50), unique=True, nullable=False)
     description = Column(String(200), nullable=True)
 
 class Room(Base):
     __tablename__ = "rooms"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     hostel_id = Column(Integer, ForeignKey("hostels.id"), nullable=False)
     room_number = Column(String(20), nullable=False)
     room_type = Column(Integer, ForeignKey("room_types.id"), nullable=True)  # e.g., Single, Double, Dormitory
@@ -166,7 +177,7 @@ class Room(Base):
 class Tenant(Base):
     __tablename__ = "tenants"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     name = Column(String(100), nullable=False)
     email = Column(String(100), unique=True, nullable=True)
     phone_number = Column(String(20), unique=True, nullable=False)
@@ -202,3 +213,16 @@ class Tenant(Base):
 
 
 
+class Manager(Base):
+    __tablename__ = "managers"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    owner_id = Column(Integer, ForeignKey("owners.id"), nullable=False)
+    name = Column(String(100), nullable=False)
+    email = Column(String(100), unique=True, nullable=True)
+    phone_number = Column(String(20), unique=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
+    hostel_id = Column(Integer, ForeignKey("hostels.id"), nullable=True)
+
+    owner = relationship("Owner", backref="managers")

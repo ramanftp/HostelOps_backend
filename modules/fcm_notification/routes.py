@@ -20,11 +20,29 @@ from datetime import datetime
 class NotificationTokenCreate(BaseModel):
     token: str
     user_id: int
+    device_name: Optional[str]
+    brand: Optional[str]
+    device_id: Optional[str]
+    platform: Optional[str]
+    os_version: Optional[str]
+    city: Optional[str]
+    latitude: Optional[float]
+    longitude: Optional[float]
+    role: Optional[str]
 
 class NotificationTokenOut(BaseModel):
     id: int
     token: str
     user_id: int
+    device_name: Optional[str]
+    brand: Optional[str]
+    device_id: Optional[str]
+    platform: Optional[str]
+    os_version: Optional[str]
+    city: Optional[str]
+    latitude: Optional[float]
+    longitude: Optional[float]
+    role: Optional[str]
     created_at: datetime
     updated_at: datetime
 
@@ -32,7 +50,7 @@ class NotificationTokenOut(BaseModel):
 def save_token(token: NotificationTokenCreate):
     from modules.fcm_notification import services  
 
-    services.save_token(token.user_id, token.token)
+    services.save_token(token.user_id, token.token, token.device_name, token.brand, token.device_id, token.platform, token.os_version, token.city, token.latitude, token.longitude, token.role)
     return {"message": "Token saved successfully"}
  
 

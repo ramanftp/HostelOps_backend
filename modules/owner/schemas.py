@@ -5,12 +5,21 @@ from typing import Optional, List
 from datetime import datetime
 import re
 
+from modules.subcriptions.schema import SubscriptionBase
+
 
 
 # Base schemas with ORM mode
 class BaseSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
+
+class ManagerCreate(BaseModel):
+    name: str
+    email: str
+    phone_number: str
+    owner_id: int
+    hostel_id:int
 
 # User schemas
 class OwnerBase(BaseSchema):
@@ -28,7 +37,9 @@ class OwnerBase(BaseSchema):
     photo_url: Optional[str] = None
 
 class OwnerCreate(OwnerBase):
-    otp: str = Field(..., min_length=4, max_length=6)
+    subscription_id: Optional[str] = None
+    
+
 
 class OwnerUpdate(BaseSchema):
     first_name: Optional[str] = None
@@ -52,6 +63,8 @@ class OwnerOut(OwnerBase):
     last_login_ip: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+    subscriptions: Optional[List[SubscriptionBase]] = None
+    managers:List[ManagerCreate] = []
 
 
 class OwnerdetailHostelRoomOut(OwnerOut):
@@ -81,7 +94,25 @@ class LoginResponse(BaseModel):
     token_type: str = "bearer"
     expires_in: int
     owner: OwnerOut
+    model_config = ConfigDict(from_attributes=True)
 
+
+
+class ManagerUpdate(BaseModel):
+    name: Optional[str] = None
+    email: Optional[str] = None
+    phone_number: Optional[str] = None
+    owner_id: Optional[int] = None
+    hostel_id: Optional[int] = None
+
+    
+class ManagerOut(BaseModel):
+    id: int
+    name: str
+    email: str
+    phone_number: str
+    hostel_id: int
+    owner: OwnerOut
 
 class FacilityMini(BaseModel):
     id: int
@@ -201,6 +232,18 @@ class RoomTypeUpdate(BaseModel):
     name: Optional[str] = Field(None, max_length=50)
     description: Optional[str] = Field(None, max_length=200)
 
+class CategoryBase(BaseSchema):
+    name: str = Field(..., max_length=50)
+
+class CategoryCreate(CategoryBase):
+    pass
+
+class CategoryUpdate(BaseSchema):
+    name: Optional[str] = Field(None, max_length=50)
+
+class CategoryOut(CategoryBase):
+    id: int
+
 
 class TenantBase(BaseSchema):
     name: str = Field(..., max_length=100)
@@ -268,11 +311,10 @@ class TenantOut(TenantBase):
     updated_at: datetime
 
 
-# Aadhaar OCR schemas
 class AadhaarData(BaseModel):
-    name: str
-    aadhaar_no: str
-    dob: str
-    gender: str
-    address: str
+    name: Optional[str] = None
+    aadhaar_no: Optional[str] = None
+    dob: Optional[str] = None
+    gender: Optional[str] = None
+    address: Optional[str] = None
     image_path: Optional[str] = None

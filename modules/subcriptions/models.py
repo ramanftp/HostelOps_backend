@@ -15,6 +15,7 @@ class Plan(Base):
     __tablename__ = "plans"
 
     id = Column(Integer, primary_key=True, index=True)
+    plan_id = Column(String(100), unique=True, nullable=False)  # Razorpay plan ID
     name = Column(String(100), nullable=False)
     description = Column(String(500), nullable=True)
     price = Column(Integer, nullable=False)  # Price in cents
@@ -34,10 +35,11 @@ class Plan(Base):
 class Subscriptions(Base):
     __tablename__ = "subscriptions"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     owner_id = Column(Integer, ForeignKey("owners.id"), nullable=False)
+    subscription_id = Column(String(100), unique=True, nullable=False)  # Razorpay subscription ID
     plan_id = Column(Integer, ForeignKey("plans.id"), nullable=False)
-    customer_id = Column(String(100), nullable=False)  # Razorpay customer ID
+    customer_id = Column(String(100), nullable=True)  # Razorpay customer ID
     start_date = Column(DateTime, default=func.now())
     end_date = Column(DateTime)
     is_active = Column(Boolean, default=True)

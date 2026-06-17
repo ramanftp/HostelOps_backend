@@ -155,3 +155,49 @@ def get_current_tenant(token: str = Depends(security), db: Session = Depends(get
         "name": tenant.name,
         "tenant": tenant
     }
+
+def get_current_manager(token: str = Depends(security), db: Session = Depends(get_db)):
+    """Get current manager from token"""
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    
+    if not token:
+        raise credentials_exception
+    
+    # Verify token
+    payload = verify_token(token)
+    if not payload:
+        raise credentials_exception
+    
+    phone_number: str = payload.get("sub")
+    manager_id: int = payload.get("manager_id")
+    owner_id: int = payload.get("owner_id")
+    
+    if not phone_number or not manager_id or not owner_id:
+        raise credentials_exception
+    
+    # Get manager from database
+    from modules.owner.models import Manager
+    manager = db.query(Manager).filter(Manager.id == manager_id).first()
+    if not manager:
+        raise credentials_exception
+    
+    # Get owner from database
+    owner = services.get_owner_by_id(db, owner_id)
+    if not owner:
+        raise credentials_exception
+    
+    # Return manager info with owner details
+    return {
+        "id": manager.id,
+        "phone_number": manager.phone_number,
+        "email": manager.email,
+        "name": manager.name,
+        "owner_id": manager.owner_id,
+        "hostel_id": manager.hostel_id,
+        "manager": manager,
+        "owner": owner
+    }

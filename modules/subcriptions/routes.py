@@ -10,13 +10,18 @@ from requests import session
 from requests.models import HTTPBasicAuth
 from sqlalchemy import Transaction, and_, func
 from sqlalchemy.orm import Query, Session
-
 from core.config import settings
 from core.database import get_db
 import requests
 
+from modules.subcriptions import services
+from modules.owner.models import Owner
+from modules.owner.security import get_current_owner
+from modules.subcriptions.models import Plan
+from modules.subcriptions.schema import PlanBase, SubscriptionBase, SubscriptionCreate
 
-router = APIRouter(prefix="/razorpay", tags=["Authentication"])
+
+router = APIRouter(prefix="/razorpay", tags=["Subscriptions"])
 
 
 RAZORPAY_KEY_ID = settings.RAZORPAY_KEY_ID
@@ -24,7 +29,9 @@ RAZORPAY_KEY_SECRET = settings.RAZORPAY_KEY_SECRET
 
 
 @router.get("/plans")
-def get_plans():
+def get_plans(
+    db: Session = Depends(get_db)
+):
     url = "https://api.razorpay.com/v1/plans"
 
     response = requests.get(
@@ -34,12 +41,16 @@ def get_plans():
 
     if response.status_code != 200:
         return {"error": response.text}
+    services.create_plans(response.json())
 
     return response.json()
 
 
 @router.get("/subscriptions")
-def get_subscriptions():
+def get_subscriptions(
+    current_owner: dict = Depends(get_current_owner),
+    db: Session = Depends(get_db)
+):
     url = "https://api.razorpay.com/v1/subscriptions"
 
     response = requests.get(
@@ -52,8 +63,42 @@ def get_subscriptions():
 
     return response.json()
 
+
+@router.get("/subscriptions/{subscription_id}")
+def get_subscription_details(
+    subscription_id: str,
+    # current_owner: dict = Depends(get_current_owner),
+    db: Session = Depends(get_db)
+):
+    url = f"https://api.razorpay.com/v1/subscriptions/{subscription_id}"
+
+    response = requests.get(
+        url,
+        auth=HTTPBasicAuth(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET)
+    )
+
+    if response.status_code != 200:
+        return {"error": response.text}
+
+    data = response.json()
+    # db_subscription = services.create_subscription(subscription)
+    # owner.subscription_id = db_subscription.id
+    # db.commit()
+    # db.refresh(owner)
+    return data
+
+
 @router.get("/my-subscriptions/{owner_id}")
-def get_user_subscriptions(owner_id: str):
+def get_user_subscriptions(
+    owner_id: int,
+    current_owner: dict = Depends(get_current_owner),
+    db: Session = Depends(get_db)
+):
+    
+    owner = db.query(Owner).filter(Owner.id == owner_id).first() 
+    if not owner:
+        raise HTTPException(status_code=404, detail="Owner not found")
+    
     url = "https://api.razorpay.com/v1/subscriptions"
 
     response = requests.get(
@@ -80,9 +125,9 @@ def get_user_subscriptions(owner_id: str):
 
 
 
+RAZORPAY_KEY_ID = settings.RAZORPAY_KEY_ID
+RAZORPAY_KEY_SECRET = settings.RAZORPAY_KEY_SECRET
 
-# RAZORPAY_KEY_ID = "rzp_test_SlaqMb6ab1wheq"
-# RAZORPAY_KEY_SECRET = "KuZgMkHtrNeC3CSd1VYeXx2Z"
 import razorpay
 client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
 
@@ -90,52 +135,54 @@ client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
 subscriptions_store = {}
 
 @router.post("/create-subscription")
-def create_subscription(data: dict):
-    plan_key = data["plan_key"] 
-    owner_id = data["owner_id"] 
+def create_subscription(data: SubscriptionCreate,
+                        db: Session = Depends(get_db)
+                        ):
+
+    plan_key = data.plan_key
+
     plans = get_plans()
-    plan = next((p for p in plans if p["key"] == plan_key), None)
+    plan = next((p for p in plans["items"] if p["id"] == plan_key), None)
 
     if not plan:
-        return {"error": "Invalid plan"}
+        raise HTTPException(status_code=400, detail="Invalid plan")
+    db_plan = db.query(Plan).filter(Plan.plan_id == plan["id"]).first()
+    owner = db.query(Owner).filter(Owner.phone_number == data.customer_contact or Owner.email == data.customer_email)
+    if owner:
+        raise HTTPException(status_code=400, detail="Owner with this contact or email already exists")
 
+    try:
+        customer = client.customer.create({
+            "name": data.customer_name,
+            "email": data.customer_email,
+            "contact": data.customer_contact,
+            "fail_existing": 0
+        })
+    except razorpay.errors.BadRequestError as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Razorpay Error: {str(e)}"
+        )
     subscription = client.subscription.create({
-        "plan_id": plan["plan_id"],
+        "plan_id": plan["id"],
         "customer_notify": 1,
         "total_count": 12,
+        "customer_email":data.customer_email,
         "notes": {
-            "owner_id": owner_id,
+            "db_plan_id":db_plan.id,
+            "customer_id": customer["id"]
         }
     })
 
+
     return {
+        "customer_id": customer["id"],
         "subscription_id": subscription["id"],
-        "plan_name": plan["name"]
+        "short_url": subscription["short_url"],
+        "plan_name": plan["item"]["name"],
     }
 
 
-from pydantic import BaseModel
-from typing import Optional, Dict, Any
-
-
-class SubscriptionEntity(BaseModel):
-    id: str
-    plan_id: Optional[str]
-    status: Optional[str]
-    notes: Optional[Dict[str, Any]]
-
-
-class SubscriptionPayload(BaseModel):
-    entity: SubscriptionEntity
-
-
-class Payload(BaseModel):
-    subscription: Optional[SubscriptionPayload]
-
-
-class RazorpayWebhook(BaseModel):
-    event: str
-    payload: Payload
 
 @router.post("/webhook")
 async def webhook(request: Request):

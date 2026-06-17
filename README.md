@@ -2,7 +2,7 @@
 
 A FastAPI-based backend system for hostel management, providing comprehensive APIs for owners to manage hostels, rooms, tenants, and payments.
 
-## Features
+## Features/register
 
 - **Owner Management**: Registration, authentication, and profile management
 - **Hostel Management**: Create and manage multiple hostels with facilities and banking details

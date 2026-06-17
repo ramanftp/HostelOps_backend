@@ -10,7 +10,7 @@ import os
 
 from sqlalchemy import inspect
 
-from modules.owner.routes import router, auth_router
+from modules.owner.routes import router, auth_router, manager, tenant
 from modules.bill_payment.routes import router as bill_router
 from modules.expenses.routes import router as expense_router
 from modules.fcm_notification.routes import router as token_router
@@ -62,6 +62,8 @@ def root():
 app.include_router(subscriptions_router)  # Include subscriptions router
 app.include_router(auth_router)
 app.include_router(router)
+app.include_router(manager)
+app.include_router(tenant)
 app.include_router(bill_router)
 app.include_router(expense_router)
 app.include_router(token_router)  # Include FCM notification router

@@ -12,16 +12,18 @@ from core.config import settings
 from core.database import get_db
 from modules.bill_payment.schema import BillOut
 from modules.owner import services
-from modules.owner.models import Facility, Owner, Hostel, Room, RoomType, Tenant
+from modules.owner.models import Category, Facility, Owner, Hostel, Room, RoomType, Tenant, Manager
 from modules.bill_payment.models import Bill, Transaction as BillTransaction
 from modules.expenses.models import Expense
 from modules.owner.schemas import (
-    FacilityCreate, FacilityOut, OTPRequest, OTPVerify, OTPResponse, LoginResponse,
+    CategoryCreate, CategoryOut, CategoryUpdate, FacilityCreate, FacilityOut, ManagerCreate, ManagerOut, ManagerUpdate, OTPRequest, OTPVerify, OTPResponse, LoginResponse,
     HostelCreate, HostelUpdate, HostelOut, OwnerCreate, OwnerUpdate, OwnerOut, OwnerdetailHostelRoomOut,
     RoomCreate, RoomHostelImgOut, RoomTypeSchema, RoomTypeCreate, RoomTypeUpdate, RoomUpdate, RoomOut,
     TenantCreate, TenantUpdate, TenantOut, AadhaarData
 )
-from modules.owner.security import create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES, get_current_owner
+from modules.owner.security import create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES, get_current_owner, get_current_manager
+from modules.subcriptions.models import Subscriptions, Plan
+from modules.subcriptions.schema import SubscriptionBase
 
 
 
@@ -69,10 +71,11 @@ def send_otp(
 ):
     """Send OTP to phone number for login"""
     # verify user exists
+    manager = services.get_manager_by_phone(db, otp_request.phone_number)
     Owner = services.get_owner_by_phone(db, otp_request.phone_number)
-    if not Owner:
+    if not Owner and not manager:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Owner not found. Please register first.")
-
+    
     result = services.send_otp(
         otp_request.phone_number,
         purpose="login"
@@ -86,32 +89,11 @@ def send_otp(
     )
 
 
-@auth_router.post("/send-registration-otp", response_model=OTPResponse)
-def send_registration_otp(
-    otp_request: OTPRequest,
-    db: Session = Depends(get_db)
-):
-    """Send OTP to phone number for registration"""
-    # Check if user already exists
-    Owner = services.get_owner_by_phone(db, otp_request.phone_number)
-    if Owner:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Owner with this phone number already exists. Please login instead.")
-
-    result = services.send_otp(
-        otp_request.phone_number,
-        purpose="registration"
-    )
-    return OTPResponse(  
-        ok=True,
-        message=result["message"],
-        expires_in=result["expires_in"],
-        debug_otp=result.get("debug_otp"),
-        sms_sent=result.get("sms_sent")
-    )
 
 
 
-@auth_router.post("/verify-otp", response_model=LoginResponse)
+
+@auth_router.post("/verify-otp")
 def verify_otp_and_login(
     otp_verify: OTPVerify,
     request: Request,
@@ -119,6 +101,8 @@ def verify_otp_and_login(
 ):
     """Verify OTP and login/register owner, returning access token"""
     try:
+        # owner = db.query(Owner).filter(Owner.phone_number == otp_verify.phone_number).first()
+
         # Authenticate with OTP
         auth_result = services.authenticate_with_otp(
             db, 
@@ -126,23 +110,45 @@ def verify_otp_and_login(
             otp_verify.otp,
             request.client.host
         )
-        
-        owner = auth_result["user"]
+        manager = db.query(Manager).filter(Manager.phone_number == otp_verify.phone_number).first()
+        if manager:
+            owner = db.query(Owner).filter(Owner.id == manager.owner_id).first()
+        else:
+            owner = auth_result["user"]
         
         # Create access token
-        access_token = create_access_token(
-            subject=owner.phone_number,
-            extra_data={
-                "owner_id": owner.id,
-            }
-        )
-        
-        return LoginResponse(
-            access_token=access_token,
-            token_type="bearer",
-            expires_in=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-            owner=owner
-        )
+        if manager:
+            access_token = create_access_token(
+                subject=manager.phone_number,
+                extra_data={
+                    "owner_id": manager.owner_id,
+                    "manager_id": manager.id
+                }
+            )
+        else:
+            access_token = create_access_token(
+                subject=owner.phone_number,
+                extra_data={
+                    "owner_id": owner.id,
+                }
+            )
+        subscription = owner.subscriptions[0] if owner.subscriptions else None,
+        plan_id = subscription[0].plan_id if subscription else 5
+        plan = db.query(Plan).filter(Plan.id == plan_id).first() 
+        if manager:
+            managers = [manager]
+        else:    
+            managers = db.query(Manager).filter(Manager.owner_id == owner.id).all()
+        return {
+            "access_token": access_token,
+            "token_type": "bearer",
+            "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+            "owner": owner,
+            "subscription": subscription,
+            "plan": plan,
+            "is_manager": bool(manager),
+            "managers": managers
+        }
         
     except services.InvalidOTPError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
@@ -207,31 +213,72 @@ def delete_room_type(
     db.commit()
     return {"message": "Room type deleted successfully"}
 
+@router.get("/categories", response_model=List[CategoryOut], tags=["Hostels"])
+def get_categories(
+    db: Session = Depends(get_db)
+):
+    categories = db.query(Category).all()
+    return categories
 
-@router.post("/register", response_model=LoginResponse, tags=["Owner"])
+@router.post("/categories", response_model=CategoryOut, tags=["Hostels"])
+def create_category(
+    category: CategoryCreate,
+    db: Session = Depends(get_db)
+):
+    db_category = Category(**category.model_dump())
+    db.add(db_category)
+    db.commit()
+    db.refresh(db_category)
+    return db_category
+@router.patch("/categories/{category_id}", response_model=CategoryOut, tags=["Hostels"])
+def update_category(
+    category_id: int,
+    category_update: CategoryUpdate,
+    db: Session = Depends(get_db)
+):
+    category = db.query(Category).filter(Category.id == category_id).first()
+    if not category:
+        raise HTTPException(status_code=404, detail="Category not found")
+    update_data = category_update.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(category, field, value)
+    db.commit()
+    db.refresh(category)
+    return category
+
+@router.delete("/categories/{category_id}", tags=["Hostels"])
+def delete_category(
+    category_id: int,
+    db: Session = Depends(get_db)
+):
+    category = db.query(Category).filter(Category.id == category_id).first()
+    if not category:
+        raise HTTPException(status_code=404, detail="Category not found")
+    db.delete(category)
+    db.commit()
+    return {"message": "Category deleted successfully"}
+
+
+@router.post("/register", tags=["Owner"])
 def register_owner(
     owner_create: OwnerCreate,
-    request: Request,
     db: Session = Depends(get_db)
 ):
     """Register a new owner with OTP verification and auto-login"""
     owner = handle_service_error(db, services.register_owner, db, owner_create)
     
-    # Create access token for auto-login
-    access_token = create_access_token(
-        subject=owner.phone_number,
-        extra_data={
-            "owner_id": owner.id,
-        }
-    )
-    
-    return LoginResponse(
-        access_token=access_token,
-        token_type="bearer",
-        expires_in=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-        owner=owner
-    )
+  
+    from modules.subcriptions.services import create_subscription
+    from modules.subcriptions.routes import get_plans, get_subscription_details
+    subscription = get_subscription_details(owner_create.subscription_id)
+    db_subscription = create_subscription(subscription, owner.id)
+    owner.subscription_id = db_subscription.id
+    db.commit()
 
+    
+    return {
+        "owner": owner
+    }
 
 @router.get("/owners", response_model=List[OwnerOut], tags=["Owner"])
 def get_owners(
@@ -375,8 +422,12 @@ def delete_hostel(
         Hostel.id == hostel_id,
         Hostel.owner_id == current_owner["id"]
     ).first()
+    
     if not hostel:
         raise HTTPException(status_code=404, detail="Hostel not found")
+    tenants = db.query(Tenant).filter(Tenant.hostel_id == hostel_id, Tenant.active == True).all()
+    if tenants:
+        raise HTTPException(status_code=400, detail="Cannot delete hostel with active tenants")
     db.delete(hostel)
     db.commit()
     return {"message": "Hostel deleted successfully"}
@@ -612,11 +663,11 @@ def extract_aadhaar_data(
 
         # Merge data safely (front priority)
         final_data = {
-            "name": front_data.get("name") or back_data.get("name"),
-            "aadhar_no": front_data.get("aadhar_no") or back_data.get("aadhar_no"),
-            "dob": front_data.get("dob") or back_data.get("dob"),
-            "gender": front_data.get("gender") or back_data.get("gender"),
-            "address": back_data.get("address") or front_data.get("address"),
+            "name": front_data.get("name"),
+            "aadhaar_no": front_data.get("aadhaar_no"),
+            "dob": front_data.get("dob"),
+            "gender": front_data.get("gender"),
+            "address": back_data.get("address"),
         }
 
         # Single clean return
@@ -1018,7 +1069,7 @@ def delete_facility(
 # TENANT MANAGEMENT ENDPOINTS
 
 
-tenant = APIRouter(prefix="/tenant", tags=["Tenant"])
+tenant = APIRouter(prefix="/tenant", tags=["Tenants"])
 
 
 @auth_router.post("/tenant/send-otp", response_model=OTPResponse, tags=["Tenant Authentication"])
@@ -1041,7 +1092,7 @@ def send_tenant_otp(
     )
 
 
-@auth_router.post("/tenant/verify-otp", response_model=LoginResponse, tags=["Tenant Authentication"])
+@auth_router.post("/tenant/verify-otp",  tags=["Tenant Authentication"])
 def verify_tenant_otp_and_login(
     otp_verify: OTPVerify,
     request: Request,
@@ -1066,12 +1117,12 @@ def verify_tenant_otp_and_login(
             }
         )
         
-        return LoginResponse(
-            access_token=access_token,
-            token_type="bearer",
-            expires_in=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-            tenant=tenant
-        )
+        return {
+            "access_token": access_token,
+            "token_type": "bearer",
+            "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+            "tenant": tenant
+        }
         
     except services.InvalidOTPError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
@@ -1087,12 +1138,12 @@ def tenant_logout():
     return {"message": "Successfully logged out"}
 
 from .security import get_current_tenant
-@tenant.get("/me", response_model=TenantOut, tags=["Tenant"])
+@tenant.get("/me", response_model=TenantOut, tags=["Tenants"])
 def get_current_tenant(current_tenant: dict = Depends(get_current_tenant)):
     """Get current tenant profile"""
     return current_tenant
 
-@tenant.get("/MyPG", response_model=TenantOut, tags=["Tenant"])   
+@tenant.get("/MyPG", response_model=TenantOut, tags=["Tenants"])   
 def get_tenant_pg(current_tenant: dict = Depends(get_current_tenant), db: Session = Depends(get_db)):
     """Get the PG/Hostel details of the tenant"""
 
@@ -1101,13 +1152,24 @@ def get_tenant_pg(current_tenant: dict = Depends(get_current_tenant), db: Sessio
         raise HTTPException(status_code=404, detail="Hostel not found")
     return hostel
 
-@tenant.get("/MyBills", response_model=List[BillOut], tags=["Tenant"])
+@tenant.get("/MyBills", response_model=List[BillOut], tags=["Tenants"])
 def get_tenant_bills(current_tenant: dict = Depends(get_current_tenant), db: Session = Depends(get_db)):
     """Get all bills for the tenant"""
     bills = db.query(Bill).filter(Bill.tenant_id == current_tenant["tenant_id"]).all()
     return bills
 
-@tenant.post("/pay-bill/{bill_id}", tags=["Tenant"])
+
+@tenant.get("/hostels", tags=["Tenants"])
+def get_hostels(
+    db: Session = Depends(get_db)
+):
+    """Get all hostels for the current owner"""
+    hostels = db.query(Hostel).all()
+    
+    
+    return hostels
+
+@tenant.post("/pay-bill/{bill_id}", tags=["Tenants"])
 def pay_bill(
     bill_id: int,
     current_tenant: dict = Depends(get_current_tenant),
@@ -1127,3 +1189,188 @@ def pay_bill(
     db.refresh(bill)
     
     return {"message": "Bill paid successfully", "bill": bill}
+
+
+# Manager router for owner-related endpoints
+manager = APIRouter(prefix="/manager", tags=["Manager"])
+
+
+@manager.post("/create", response_model=ManagerOut, tags=["Manager"])
+def create_manager(
+    manager_create: ManagerCreate,
+    current_owner: dict = Depends(get_current_owner),
+    db: Session = Depends(get_db)
+):
+    """Create a new manager under the current owner"""
+    db_manager = services.create_manager(db, manager_create, current_owner["id"])
+    return db_manager
+
+@manager.get("/managers", response_model=List[ManagerOut], tags=["Manager"])
+def get_managers(
+    current_owner: dict = Depends(get_current_owner),
+    db: Session = Depends(get_db)
+):
+    """Get all managers for the current owner"""
+    managers = db.query(Manager).filter(Manager.owner_id == current_owner["id"]).all()
+    return managers
+
+@manager.patch("/managers/{manager_id}", response_model=ManagerOut, tags=["Manager"])
+def update_manager(
+    manager_id: int,
+    manager_update: ManagerUpdate,
+    current_owner: dict = Depends(get_current_owner),
+    db: Session = Depends(get_db)
+):
+    """Update a manager's details"""
+    manager = db.query(Manager).filter(
+        Manager.id == manager_id,
+        Manager.owner_id == current_owner["id"]
+    ).first()
+    if not manager:
+        raise HTTPException(status_code=404, detail="Manager not found")
+    
+    update_data = manager_update.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(manager, field, value)
+    db.commit()
+    db.refresh(manager)
+    return manager
+
+@manager.delete("/managers/{manager_id}", tags=["Manager"])
+def delete_manager(
+    manager_id: int,
+    current_owner: dict = Depends(get_current_owner),
+    db: Session = Depends(get_db)
+):
+    """Delete a manager"""
+    manager = db.query(Manager).filter(
+        Manager.id == manager_id,
+        Manager.owner_id == current_owner["id"]
+    ).first()
+    if not manager:
+        raise HTTPException(status_code=404, detail="Manager not found")
+    db.delete(manager)
+    db.commit()
+    return {"message": "Manager deleted successfully"}
+
+# Manager-specific routes for managing their assigned hostel
+@manager.get("/my-hostel", response_model=HostelOut, tags=["Manager"])
+def get_manager_hostel(
+    current_manager: dict = Depends(get_current_manager),
+    db: Session = Depends(get_db)
+):
+    """Get the hostel assigned to the current manager"""
+    if not current_manager["hostel_id"]:
+        raise HTTPException(status_code=404, detail="No hostel assigned to this manager")
+    
+    hostel = db.query(Hostel).filter(Hostel.id == current_manager["hostel_id"]).first()
+    if not hostel:
+        raise HTTPException(status_code=404, detail="Hostel not found")
+    
+    # Populate room_type_name for each room
+    for room in hostel.rooms:
+        if room.room_type_rel:
+            room.room_type_name = room.room_type_rel.name
+    
+    return hostel
+
+@manager.get("/my-hostel/rooms", response_model=List[RoomHostelImgOut], tags=["Manager"])
+def get_manager_hostel_rooms(
+    current_manager: dict = Depends(get_current_manager),
+    db: Session = Depends(get_db)
+):
+    """Get all rooms for the manager's assigned hostel"""
+    if not current_manager["hostel_id"]:
+        raise HTTPException(status_code=404, detail="No hostel assigned to this manager")
+    
+    rooms = db.query(Room).filter(Room.hostel_id == current_manager["hostel_id"]).all()
+    
+    # Populate room_type_name for each room
+    for room in rooms:
+        if room.room_type_rel:
+            room.room_type_name = room.room_type_rel.name
+    
+    return rooms
+
+@manager.get("/my-hostel/tenants", response_model=List[TenantOut], tags=["Manager"])
+def get_manager_hostel_tenants(
+    current_manager: dict = Depends(get_current_manager),
+    db: Session = Depends(get_db)
+):
+    """Get all tenants for the manager's assigned hostel"""
+    if not current_manager["hostel_id"]:
+        raise HTTPException(status_code=404, detail="No hostel assigned to this manager")
+    
+    tenants = db.query(Tenant).filter(
+        Tenant.hostel_id == current_manager["hostel_id"],
+        Tenant.active == True
+    ).all()
+    return tenants
+
+@manager.get("/my-hostel/bills", response_model=List[BillOut], tags=["Manager"])
+def get_manager_hostel_bills(
+    current_manager: dict = Depends(get_current_manager),
+    db: Session = Depends(get_db)
+):
+    """Get all bills for the manager's assigned hostel"""
+    if not current_manager["hostel_id"]:
+        raise HTTPException(status_code=404, detail="No hostel assigned to this manager")
+    
+    bills = db.query(Bill).filter(Bill.hostel_id == current_manager["hostel_id"]).all()
+    return bills
+
+@manager.get("/my-hostel/expenses", tags=["Manager"])
+def get_manager_hostel_expenses(
+    current_manager: dict = Depends(get_current_manager),
+    db: Session = Depends(get_db)
+):
+    """Get all expenses for the manager's assigned hostel"""
+    if not current_manager["hostel_id"]:
+        raise HTTPException(status_code=404, detail="No hostel assigned to this manager")
+    
+    expenses = db.query(Expense).filter(
+        Expense.hostel_id == current_manager["hostel_id"],
+        Expense.created_by == current_manager["owner_id"]
+    ).all()
+    return expenses
+
+@manager.get("/my-hostel/dashboard", tags=["Manager"])
+def get_manager_dashboard(
+    current_manager: dict = Depends(get_current_manager),
+    db: Session = Depends(get_db)
+):
+    """Get dashboard data for the manager's assigned hostel"""
+    if not current_manager["hostel_id"]:
+        raise HTTPException(status_code=404, detail="No hostel assigned to this manager")
+    
+    hostel_id = current_manager["hostel_id"]
+    
+    room_filter = Room.hostel_id == hostel_id
+    tenant_filter = and_(Tenant.hostel_id == hostel_id, Tenant.active.is_(True))
+    expense_filter = Expense.hostel_id == hostel_id
+    
+    rooms_count = db.query(Room).filter(room_filter).count() or 0
+    bed_count = db.query(func.sum(Room.no_of_beds)).filter(room_filter).scalar() or 0
+    tenants_count = db.query(Tenant).filter(tenant_filter).count() or 0
+    total_amount = db.query(func.sum(Bill.amount)).filter(
+        Bill.status != "paid",
+        Bill.hostel_id == hostel_id
+    ).scalar() or 0
+    total_payments = db.query(func.sum(BillTransaction.amount))\
+        .join(Tenant)\
+        .filter(tenant_filter)\
+        .scalar() or 0
+    total_expenses = db.query(func.sum(Expense.amount)).filter(expense_filter).scalar() or 0
+    
+    payment_due = total_amount - total_payments
+    
+    return {
+        "rooms_count": rooms_count,
+        "bed_count": bed_count,
+        "tenants_count": tenants_count,
+        "vacant_beds": bed_count - tenants_count,
+        "total_amount": total_amount,
+        "total_payments": total_payments,
+        "total_expenses": total_expenses,
+        "payment_due": payment_due
+    }
