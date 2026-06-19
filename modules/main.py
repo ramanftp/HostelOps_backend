@@ -42,7 +42,7 @@ os.makedirs("uploads", exist_ok=True)
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads_legacy")
 
 
-# firebase_admin.initialize_app(cred)
+firebase_admin.initialize_app(cred)
 
 app.add_middleware(
     CORSMiddleware,
