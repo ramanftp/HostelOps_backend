@@ -708,31 +708,31 @@ Thank you,
 
 
 
-from twilio.rest import Client
+# from twilio.rest import Client
 
 
-client = Client(ACCOUNT_SID, AUTH_TOKEN)
+# client = Client(ACCOUNT_SID, AUTH_TOKEN)
 
 
-@router.post("/send-reminder")
-def send_reminder(data: ReminderRequest):
+# @router.post("/send-reminder")
+# def send_reminder(data: ReminderRequest):
 
-    variables = json.dumps({
-        "1": data.owner_name,
-        "2": data.tenant_name,
-        "3": data.room_no,
-        "4": data.pg_name,
-        "5": str(data.amount)
-    })
+#     variables = json.dumps({
+#         "1": data.owner_name,
+#         "2": data.tenant_name,
+#         "3": data.room_no,
+#         "4": data.pg_name,
+#         "5": str(data.amount)
+#     })
 
-    message = client.messages.create(
-        from_='whatsapp:+14155238886',
-        to=f'whatsapp:{data.phone}',
-        content_sid="HX1e2486cd1a8f742c880a665dcf318c24",
-        content_variables=variables
-    )
+#     message = client.messages.create(
+#         from_='whatsapp:+14155238886',
+#         to=f'whatsapp:{data.phone}',
+#         content_sid="HX1e2486cd1a8f742c880a665dcf318c24",
+#         content_variables=variables
+#     )
 
-    return {
-        "status": "sent",
-        "sid": message.sid
-    }
+#     return {
+#         "status": "sent",
+#         "sid": message.sid
+#     }

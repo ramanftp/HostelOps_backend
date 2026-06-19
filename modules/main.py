@@ -15,6 +15,7 @@ from modules.bill_payment.routes import router as bill_router
 from modules.expenses.routes import router as expense_router
 from modules.fcm_notification.routes import router as token_router
 from modules.complaints.routes import router as complaint_router
+from modules.staffs.routes import router as staffs_router
 from core.database import SessionLocal
 
 from core.config import DATABASE_URL
@@ -41,7 +42,7 @@ os.makedirs("uploads", exist_ok=True)
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads_legacy")
 
 
-firebase_admin.initialize_app(cred)
+# firebase_admin.initialize_app(cred)
 
 app.add_middleware(
     CORSMiddleware,
@@ -68,6 +69,6 @@ app.include_router(bill_router)
 app.include_router(expense_router)
 app.include_router(token_router)  # Include FCM notification router
 app.include_router(complaint_router)  # Include complaints router
-
+app.include_router(staffs_router)  # Include staffs router
 
 

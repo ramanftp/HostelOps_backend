@@ -37,10 +37,6 @@ def get_complaints_by_tenant(tenant_id: int, db: Session = Depends(get_db)):
     return services.get_complaints_by_tenant(db, tenant_id)
 
 
-@router.get("/types", response_model=List[ComplaintTypeOut], tags=["Complaints"])
-def list_complaint_types(db: Session = Depends(get_db)):
-    return services.get_complaint_types(db)
-
 
 @router.get("/owner/{owner_id}", response_model=List[ComplaintOut], tags=["Complaints"])
 def get_complaints_by_owner(owner_id: int, db: Session = Depends(get_db)):
