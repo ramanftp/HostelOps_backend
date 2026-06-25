@@ -14,6 +14,20 @@ class BaseSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class CategoryBase(BaseSchema):
+    name: str = Field(..., max_length=50)
+
+class CategoryCreate(CategoryBase):
+    pass
+
+class CategoryUpdate(BaseSchema):
+    name: Optional[str] = Field(None, max_length=50)
+
+class CategoryOut(CategoryBase):
+    id: int
+
+
+
 class ManagerCreate(BaseModel):
     name: str
     email: str
@@ -35,6 +49,13 @@ class OwnerBase(BaseSchema):
     country: Optional[str] = None
     zipcode: Optional[str] = None
     photo_url: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    email: Optional[str] = Field(None, max_length=100)
+    contact_number: Optional[str] = Field(None, max_length=20)
+    website: Optional[str] = Field(None, max_length=100)
+    house_rules: Optional[List[str]] = []  # List of house rules
+    policies: Optional[List[str]] = []  # List of policies
 
 class OwnerCreate(OwnerBase):
     subscription_id: Optional[str] = None
@@ -132,7 +153,7 @@ class HostelBase(BaseSchema):
     bank_account_number: Optional[str] = None
     bank_ifsc_code: Optional[str] = None
     bank_name: Optional[str] = None
-    category: Optional[str] = None
+    category: Optional[int] = None
     bank_account_holder_name: Optional[str] = None
     upi_id: Optional[str] = None
     is_cash: Optional[bool] = True
@@ -153,7 +174,7 @@ class HostelUpdate(BaseSchema):
     bank_account_number: Optional[str] = None
     bank_ifsc_code: Optional[str] = None
     bank_name: Optional[str] = None
-    category: Optional[str] = None
+    category: Optional[int] = None
     bank_account_holder_name: Optional[str] = None
     upi_id: Optional[str] = None
     is_cash: Optional[bool] = None
@@ -164,6 +185,8 @@ class HostelOut(HostelBase):
     owner_id: int
     rooms: List["RoomOut"] = []
     tenants: List["TenantOut"] = []
+    facilities_list: Optional[List[FacilityMini]] = []
+    category_rel: Optional[CategoryOut] = None  # List of facilities in the hostel
     created_at: datetime
     updated_at: datetime
 
@@ -184,6 +207,7 @@ class RoomUpdate(BaseSchema):
     no_of_beds: Optional[int] = None
     no_of_occupied_beds: Optional[int] = None
     theme_color: Optional[str] = None
+    
 class RoomOut(RoomBase):
     id: int
     hostel_id: int
@@ -232,18 +256,28 @@ class RoomTypeUpdate(BaseModel):
     name: Optional[str] = Field(None, max_length=50)
     description: Optional[str] = Field(None, max_length=200)
 
-class CategoryBase(BaseSchema):
-    name: str = Field(..., max_length=50)
 
-class CategoryCreate(CategoryBase):
+
+class HouseRuleBase(BaseSchema):
+    name: str 
+
+class HouseRuleCreate(HouseRuleBase):
     pass
 
-class CategoryUpdate(BaseSchema):
-    name: Optional[str] = Field(None, max_length=50)
+class HouseRuleUpdate(BaseSchema):
+    name: str
 
-class CategoryOut(CategoryBase):
+class HouseRuleOut(HouseRuleBase):
     id: int
 
+class PolicyBase(BaseSchema):
+    name: str 
+class PolicyCreate(PolicyBase):
+    pass
+class PolicyOut(PolicyBase):
+    id: int
+class PolicyUpdate(BaseSchema):
+    name: str    
 
 class TenantBase(BaseSchema):
     name: str = Field(..., max_length=100)
@@ -304,9 +338,9 @@ class TenantUpdate(BaseSchema):
 
 
 class TenantOut(TenantBase):
-    id: int
-    hostel_id: Optional[int] = None
+    id: int    
     room: Optional[RoomOut] = None
+    hostel_id: Optional[int] = None
     created_at: datetime
     updated_at: datetime
 

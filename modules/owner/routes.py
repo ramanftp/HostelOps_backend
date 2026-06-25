@@ -12,16 +12,16 @@ from core.config import settings
 from core.database import get_db
 from modules.bill_payment.schema import BillOut
 from modules.owner import services
-from modules.owner.models import Category, Facility, Owner, Hostel, Room, RoomType, Tenant, Manager
+from modules.owner.models import Category, Facility, HouseRules, Owner, Hostel, Policies, Room, RoomType, Tenant, Manager
 from modules.bill_payment.models import Bill, Transaction as BillTransaction
 from modules.expenses.models import Expense
 from modules.owner.schemas import (
-    CategoryCreate, CategoryOut, CategoryUpdate, FacilityCreate, FacilityOut, ManagerCreate, ManagerOut, ManagerUpdate, OTPRequest, OTPVerify, OTPResponse, LoginResponse,
-    HostelCreate, HostelUpdate, HostelOut, OwnerCreate, OwnerUpdate, OwnerOut, OwnerdetailHostelRoomOut,
+    CategoryCreate, CategoryOut, CategoryUpdate, FacilityCreate, FacilityOut, HouseRuleCreate, HouseRuleOut, HouseRuleUpdate, HouseRuleUpdate, ManagerCreate, ManagerOut, ManagerUpdate, OTPRequest, OTPVerify, OTPResponse, LoginResponse,
+    HostelCreate, HostelUpdate, HostelOut, OwnerCreate, OwnerUpdate, OwnerOut, OwnerdetailHostelRoomOut, PolicyCreate, PolicyOut, PolicyUpdate,
     RoomCreate, RoomHostelImgOut, RoomTypeSchema, RoomTypeCreate, RoomTypeUpdate, RoomUpdate, RoomOut,
     TenantCreate, TenantUpdate, TenantOut, AadhaarData
 )
-from modules.owner.security import create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES, get_current_owner, get_current_manager
+from modules.owner.security import create_access_token, ACCESS_TOKEN_EXPIRE, get_current_owner, get_current_manager
 from modules.subcriptions.models import Subscriptions, Plan
 from modules.subcriptions.schema import SubscriptionBase
 
@@ -142,7 +142,7 @@ def verify_otp_and_login(
         return {
             "access_token": access_token,
             "token_type": "bearer",
-            "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+            "expires_in": ACCESS_TOKEN_EXPIRE * 24 * 60,
             "owner": owner,
             "subscription": subscription,
             "plan": plan,
@@ -258,6 +258,95 @@ def delete_category(
     db.commit()
     return {"message": "Category deleted successfully"}
 
+@router.get("/house_rules", response_model=List[HouseRuleOut], tags=["Hostels"])
+def get_house_rules(
+    db: Session = Depends(get_db)
+):
+    house_rules = db.query(HouseRules).all()
+    return house_rules
+
+@router.post("/house_rules", response_model=HouseRuleOut, tags=["Hostels"])
+def create_house_rule(
+    house_rule: HouseRuleCreate,
+    db: Session = Depends(get_db)
+):
+    db_house_rule = HouseRules(**house_rule.model_dump())
+    db.add(db_house_rule)
+    db.commit()
+    db.refresh(db_house_rule)
+    return db_house_rule
+
+@router.patch("/house_rules/{house_rule_id}", response_model=HouseRuleOut, tags=["Hostels"])
+def update_house_rule(
+    house_rule_id: int,
+    house_rule_update: HouseRuleUpdate,
+    db: Session = Depends(get_db)
+):
+    house_rule = db.query(HouseRules).filter(HouseRules.id == house_rule_id).first()
+    if not house_rule:
+        raise HTTPException(status_code=404, detail="House rule not found")
+    update_data = house_rule_update.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(house_rule, field, value)
+    db.commit()
+    db.refresh(house_rule)
+    return house_rule
+
+@router.delete("/house_rules/{house_rule_id}", tags=["Hostels"])
+def delete_house_rule(
+    house_rule_id: int,
+    db: Session = Depends(get_db)
+):
+    house_rule = db.query(HouseRules).filter(HouseRules.id == house_rule_id).first()
+    if not house_rule:
+        raise HTTPException(status_code=404, detail="House rule not found")
+    db.delete(house_rule)
+    db.commit()
+    return {"message": "House rule deleted successfully"}
+
+@router.get("/policies", response_model=List[PolicyOut], tags=["Hostels"])
+def get_policies(
+    db: Session = Depends(get_db)
+):
+    policies = db.query(Policies).all()
+    return policies
+@router.post("/policies", response_model=PolicyOut, tags=["Hostels"])
+def create_policy(
+    policy: PolicyCreate,
+    db: Session = Depends(get_db)
+):
+    db_policy = Policies(**policy.model_dump())
+    db.add(db_policy)
+    db.commit()
+    db.refresh(db_policy)
+    return db_policy
+
+@router.patch("/policies/{policy_id}", response_model=PolicyOut, tags=["Hostels"])
+def update_policy(
+    policy_id: int,
+    policy_update: PolicyUpdate,
+    db: Session = Depends(get_db)
+):
+    policy = db.query(Policies).filter(Policies.id == policy_id).first()
+    if not policy:
+        raise HTTPException(status_code=404, detail="Policy not found")
+    update_data = policy_update.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(policy, field, value)
+    db.commit()
+    db.refresh(policy)
+    return policy
+@router.delete("/policies/{policy_id}", tags=["Hostels"])
+def delete_policy(
+    policy_id: int,
+    db: Session = Depends(get_db)
+):
+    policy = db.query(Policies).filter(Policies.id == policy_id).first()
+    if not policy:
+        raise HTTPException(status_code=404, detail="Policy not found")
+    db.delete(policy)
+    db.commit()
+    return {"message": "Policy deleted successfully"}
 
 @router.post("/register", tags=["Owner"])
 def register_owner(
@@ -340,7 +429,7 @@ def get_hostels(
     return hostels
 
 
-@router.post("/hostels", response_model=HostelOut, tags=["Hostels"])
+@router.post("/hostels", response_model=HostelOut, tags=["Hostels"], status_code=status.HTTP_201_CREATED)
 def create_hostel(
     hostel: HostelCreate,
     current_owner: dict = Depends(get_current_owner),
@@ -411,7 +500,7 @@ def partial_update_hostel(
     return hostel
 
 
-@router.delete("/hostels/{hostel_id}", tags=["Hostels"])
+@router.delete("/hostels/{hostel_id}", tags=["Hostels"], status_code=status.HTTP_204_NO_CONTENT)
 def delete_hostel(
     hostel_id: int,
     current_owner: dict = Depends(get_current_owner),
@@ -939,6 +1028,8 @@ async def upload_tenant_photo(
     return {"url": url, "message": "Tenant photo uploaded successfully"}
 
 
+
+
 @router.post("/upload/hostel/{hostel_id}/photos", tags=["Uploads"])
 async def upload_hostel_photos(
     hostel_id: int,
@@ -947,28 +1038,70 @@ async def upload_hostel_photos(
     db: Session = Depends(get_db)
 ):
     """Upload multiple photos for a hostel"""
+
+    # ✅ Verify hostel ownership
     hostel = db.query(Hostel).filter(
         Hostel.id == hostel_id,
         Hostel.owner_id == current_owner["id"]
     ).first()
+
     if not hostel:
         raise HTTPException(status_code=404, detail="Hostel not found")
 
     urls = []
+
     for file in files:
-        if not file.content_type.startswith("image/"):
-            raise HTTPException(status_code=400, detail=f"File {file.filename} must be an image")
+        try:
+            # ✅ Validate file type
+            if not file.content_type.startswith("image/"):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"File {file.filename} must be an image"
+                )
 
-        file_extension = os.path.splitext(file.filename)[1]
-        unique_filename = f"{uuid.uuid4()}{file_extension}"
-        file_path = os.path.join(settings.hostel_image_dir, unique_filename)
+            # ✅ Read content to validate size (optional but recommended)
+            contents = await file.read()
+            if len(contents) == 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"File {file.filename} is empty"
+                )
 
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+            # ✅ Reset pointer after read (CRITICAL)
+            file.file.seek(0)
 
-        url = f"{settings.hostel_image_url}/{unique_filename}"
-        urls.append(url)
+            # ✅ Generate unique file path (organized per hostel)
+            file_ext = os.path.splitext(file.filename)[1].lower()
+            file_key = f"hostel/{hostel_id}/{uuid.uuid4()}{file_ext}"
 
+            services.s3_client.upload_fileobj(
+                Fileobj=file.file,
+                Bucket=services.BUCKET,
+                Key=file_key,
+                ExtraArgs={
+                    "ContentType": file.content_type,
+                    "ACL": "public-read"
+                },
+            )
+
+
+            # ✅ Build correct path-style URL
+            file_url = (
+                f"{settings.S3_ENDPOINT_URL}/{BUCKET}/{file_key}"
+            )
+
+            urls.append(file_url)
+
+        except HTTPException:
+            raise
+
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Upload failed for {file.filename}: {str(e)}"
+            )
+
+    # ✅ Append to existing photos array
     if hostel.photos_urls:
         hostel.photos_urls.extend(urls)
     else:
@@ -977,7 +1110,12 @@ async def upload_hostel_photos(
     db.commit()
     db.refresh(hostel)
 
-    return {"urls": urls, "message": f"Uploaded {len(urls)} photos successfully"}
+    return {
+        "urls": urls,
+        "message": f"Uploaded {len(urls)} photos successfully"
+    }
+
+
 
 @router.delete("/upload/hostel/{hostel_id}/photos", tags=["Uploads"])
 def delete_hostel_photos(
@@ -1120,8 +1258,9 @@ def verify_tenant_otp_and_login(
         return {
             "access_token": access_token,
             "token_type": "bearer",
-            "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-            "tenant": tenant
+            "expires_in": ACCESS_TOKEN_EXPIRE * 24 * 60,
+            "tenant": tenant,
+            "owner_id": tenant.hostel.owner_id
         }
         
     except services.InvalidOTPError as e:
@@ -1138,21 +1277,22 @@ def tenant_logout():
     return {"message": "Successfully logged out"}
 
 from .security import get_current_tenant
-@tenant.get("/me", response_model=TenantOut, tags=["Tenants"])
+@tenant.get("/me", tags=["Tenants"])
 def get_current_tenant(current_tenant: dict = Depends(get_current_tenant)):
     """Get current tenant profile"""
+    tenant = current_tenant
     return current_tenant
 
-@tenant.get("/MyPG", response_model=TenantOut, tags=["Tenants"])   
+@tenant.get("/MyPG",  tags=["Tenants"])   
 def get_tenant_pg(current_tenant: dict = Depends(get_current_tenant), db: Session = Depends(get_db)):
     """Get the PG/Hostel details of the tenant"""
-
-    hostel = db.query(Hostel).filter(Hostel.id == current_tenant["hostel_id"]).first()
+    tenant = current_tenant
+    hostel = db.query(Hostel).filter(Hostel.id == tenant['tenant'].hostel_id).first()
     if not hostel:
         raise HTTPException(status_code=404, detail="Hostel not found")
     return hostel
 
-@tenant.get("/MyBills", response_model=List[BillOut], tags=["Tenants"])
+@tenant.get("/MyBills",  tags=["Tenants"])
 def get_tenant_bills(current_tenant: dict = Depends(get_current_tenant), db: Session = Depends(get_db)):
     """Get all bills for the tenant"""
     bills = db.query(Bill).filter(Bill.tenant_id == current_tenant["tenant_id"]).all()

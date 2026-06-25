@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     
     # Security
     SECRET_KEY: str = "your-secret-key-change-in-production"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30 * 24 * 60  # 30 days
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30 
     
     # CORS
     BACKEND_CORS_ORIGINS: list = ["*"]
@@ -55,6 +55,11 @@ class Settings(BaseSettings):
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379
     REDIS_DB: int = 0
+
+    # AWS S3 (for file uploads)
+    S3_ENDPOINT_URL: Optional[str] = None
+    S3_ACCESS_KEY_ID: Optional[str] = None
+    S3_SECRET_ACCESS_KEY: Optional[str] = None
     
     # Google Cloud Vision API
     GOOGLE_CLOUD_CREDENTIALS_PATH: Optional[str] = None

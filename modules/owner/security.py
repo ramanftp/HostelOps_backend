@@ -18,7 +18,7 @@ security = HTTPBearer()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/verify-otp", auto_error=False)
 
 # Token settings
-ACCESS_TOKEN_EXPIRE_MINUTES = settings.ACCESS_TOKEN_EXPIRE_MINUTES or 30 * 24 * 60  # 30 days
+ACCESS_TOKEN_EXPIRE = settings.ACCESS_TOKEN_EXPIRE_MINUTES or 30 
 ALGORITHM = "HS256"
 SECRET_KEY = settings.SECRET_KEY
 
@@ -32,7 +32,7 @@ def create_access_token(
     if expires_delta:
         expire = datetime.utcnow() + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        expire = datetime.utcnow() + timedelta(days=ACCESS_TOKEN_EXPIRE)
     
     to_encode = {
         "exp": expire,
@@ -141,7 +141,7 @@ def get_current_tenant(token: str = Depends(security), db: Session = Depends(get
         raise credentials_exception
     
     # Check if tenant is active
-    if tenant.status != "active":
+    if tenant.active != True:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Tenant account is inactive"

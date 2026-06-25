@@ -596,3 +596,26 @@ def create_manager(db: Session, manager_data: Dict[str, Any], owner_id: int) -> 
     db.commit()
     db.refresh(new_manager)
     return new_manager
+
+import boto3
+from botocore.config import Config
+
+
+
+s3_client = boto3.client(
+    's3',
+    endpoint_url=settings.S3_ENDPOINT_URL,
+    aws_access_key_id=settings.S3_ACCESS_KEY_ID,
+    aws_secret_access_key=settings.S3_SECRET_ACCESS_KEY,
+    config=Config(
+        signature_version="s3v4",
+        s3={
+            "addressing_style": "path",
+            "payload_signing_enabled": False,
+        },
+    ),
+    # region_name='YOUR_REGION'
+)
+
+
+BUCKET = "rentvyn"

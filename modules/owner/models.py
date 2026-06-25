@@ -1,7 +1,7 @@
 from email.mime import base
 import uuid
 
-from sqlalchemy import UUID, Column, Integer, String, Boolean, DateTime, JSON, ForeignKey
+from sqlalchemy import UUID, Column, Float, Integer, String, Boolean, DateTime, JSON, ForeignKey
 from sqlalchemy.sql import func
 from sqlalchemy.orm import object_session, relationship
 from sqlalchemy.ext.hybrid import hybrid_property
@@ -59,10 +59,21 @@ class Category(Base):
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     name = Column(String(50), unique=True, nullable=False)
 
+class HouseRules(Base):
+    __tablename__ = "house_rules"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    name = Column(String(200), unique=True, nullable=False)
+
+class Policies(Base):
+    __tablename__ = "policies"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    name = Column(String(200), unique=True, nullable=False)
+
 
 class Hostel(Base):
     __tablename__ = "hostels"
-
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     owner_id = Column(Integer, ForeignKey("owners.id"), nullable=False)
     name = Column(String(100), nullable=False)
@@ -80,12 +91,20 @@ class Hostel(Base):
     bank_name = Column(String(100), nullable=True)
     bank_account_holder_name = Column(String(100), nullable=True)   
     upi_id = Column(String(100), nullable=True)
+    latitude = Column(Float, nullable=True)
+    longitude = Column(Float, nullable=True)
+    min_price = Column(Integer, nullable=True)
+    max_price = Column(Integer, nullable=True)
+    email = Column(String(100), nullable=True)
+    contact_number = Column(String(20), nullable=True)
+    website = Column(String(100), nullable=True)
     # category = Column(String(20), nullable=True)  # women, men, coliving...
     category = Column(Integer, ForeignKey("categories.id"), nullable=True)
     is_cash = Column(Boolean, default=True)
     facilities = Column(JSON, nullable=True)  # List of facilities
     theme_color = Column(String(7), nullable=True, default="#3B82F6")  # Hex color code
-
+    house_rules = Column(JSON, nullable=True)  # List of house rules
+    policies = Column(JSON, nullable=True)  # List of policies
 
     owner = relationship("Owner", back_populates="hostels")
     rooms = relationship("Room", back_populates="hostel", cascade="all, delete-orphan")
@@ -93,7 +112,7 @@ class Hostel(Base):
     bills = relationship("Bill", back_populates="hostel", cascade="all, delete-orphan")
     transactions = relationship("Transaction", back_populates="hostel", cascade="all, delete-orphan")
     expenses = relationship("Expense", back_populates="hostel", cascade="all, delete-orphan")
-
+    category_rel = relationship("Category", backref="hostels")
 
     @hybrid_property
     def facilities_list(self):
@@ -103,6 +122,7 @@ class Hostel(Base):
         if self.facilities:
                 return session.query(Facility).filter(Facility.id.in_(self.facilities)).all()
         return []
+    
 
 class RoomType(Base):
     __tablename__ = "room_types"

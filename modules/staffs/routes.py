@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from core.database import get_db
+from modules.owner.security import get_current_owner
 
 from .models import Staff, WorkType, Status, Shift
 from .schemas import StaffMasterData, StaffMasterCreate, StaffMasterUpdate, StaffsData, StaffCreate, StaffUpdate
@@ -255,13 +256,29 @@ def delete_shift(
     }
 
 @router.get(
-    "/",
+    "/staffs",
     response_model=list[StaffsData]
 )
 def get_staffs(
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    owner :int = Depends(get_current_owner)
 ):
-    return db.query(Staff).all()
+    Staff_ids = db.query(Staff).all()
+    res = []
+    for staff in Staff_ids:
+        res.append({
+            "id": staff.id,
+            "name": staff.name,
+            "mobile": staff.mobile,
+            "salary": staff.salary,
+            "work_type": db.query(WorkType).filter(WorkType.id == staff.work_type_id).first(),
+            "status": db.query(Status).filter(Status.id == staff.status_id).first(),
+            "shift": db.query(Shift).filter(Shift.id == staff.shift_id).first(),
+            "hostel_id": staff.hostel_id,
+            "owner_id": staff.owner_id
+        })   
+    return res
+
 
 
 @router.get(
@@ -270,7 +287,8 @@ def get_staffs(
 )
 def get_staff(
     staff_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+     owner :int = Depends(get_current_owner)
 ):
     staff = db.query(Staff).filter(
         Staff.id == staff_id
@@ -286,12 +304,13 @@ def get_staff(
 
 
 @router.post(
-    "/",
+    "/create",
     response_model=StaffsData
 )
 def create_staff(
     staff: StaffCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    owner :int = Depends(get_current_owner)
 ):
     db_staff = Staff(**staff.model_dump())
 
@@ -309,7 +328,8 @@ def create_staff(
 def update_staff(
     staff_id: int,
     staff_update: StaffUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    owner :int = Depends(get_current_owner)
 ):
     staff = db.query(Staff).filter(
         Staff.id == staff_id
@@ -337,7 +357,8 @@ def update_staff(
 @router.delete("/{staff_id}")
 def delete_staff(
     staff_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    owner :int = Depends(get_current_owner)
 ):
     staff = db.query(Staff).filter(
         Staff.id == staff_id

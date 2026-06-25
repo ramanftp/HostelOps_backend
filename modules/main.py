@@ -46,7 +46,7 @@ app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads_legacy")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # or your frontend URL
+    allow_origins=["https://suppositionless-geralyn-jovially.ngrok-free.dev"],  # or your frontend URL
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

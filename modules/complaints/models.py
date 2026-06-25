@@ -35,3 +35,18 @@ class Complaint(Base):
     tenant = relationship("Tenant", backref="complaints")
     owner = relationship("Owner", backref="complaints")
     complaint_type = relationship("ComplaintType", back_populates="complaints")
+
+
+class NoticeBoard(Base):
+    __tablename__ = "notice_boards"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    hostel_id = Column(Integer, ForeignKey("hostels.id"), nullable=False)
+    title = Column(String(255), nullable=False)
+    description = Column(String(1000), nullable=False)
+    from_date = Column(DateTime, nullable=False)
+    to_date = Column(DateTime, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
+
+    hostel = relationship("Hostel", backref="notice_boards")

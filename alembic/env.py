@@ -25,6 +25,7 @@ from modules.expenses import models as expense_models
 from modules.fcm_notification import models as fcm_models
 from modules.complaints import models as complaint_models
 from modules.subcriptions import models as subscription_models
+from modules.staffs import models as staff_models
 target_metadata = Base.metadata
 
 # other values from the config, defined by the needs of env.py,

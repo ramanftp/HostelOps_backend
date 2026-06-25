@@ -33,10 +33,11 @@ class StaffsData(BaseModel):
     name: str
     mobile: str
     salary: int
-    work_type_id: int
-    status_id: int
-    shift_id: int
-
+    work_type : StaffMasterData
+    status : StaffMasterData
+    shift : StaffMasterData
+    hostel_id: int
+    owner_id: int
     class Config:
         from_attributes = True
 
@@ -48,6 +49,8 @@ class StaffCreate(BaseModel):
     work_type_id: int
     status_id: int
     shift_id: int
+    hostel_id: int
+    owner_id: int
 
 
 class StaffUpdate(BaseModel):
@@ -57,5 +60,7 @@ class StaffUpdate(BaseModel):
     work_type_id: Optional[int] = None
     status_id: Optional[int] = None
     shift_id: Optional[int] = None
+    hostel_id: Optional[int] = None
+    owner_id: Optional[int] = None
 
 

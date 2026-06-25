@@ -35,3 +35,6 @@ class Staff(Base):
     work_type_id = Column(Integer, ForeignKey("work_types.id"))
     status_id = Column(Integer, ForeignKey("statuses.id"))
     shift_id = Column(Integer, ForeignKey("shifts.id"))
+    hostel_id = Column(Integer, ForeignKey("hostels.id"))
+    owner_id = Column(Integer, ForeignKey("owners.id"))
+
