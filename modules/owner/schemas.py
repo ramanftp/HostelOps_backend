@@ -151,12 +151,16 @@ class HostelBase(BaseSchema):
     zipcode: Optional[str] = None
     photos_urls: Optional[List[str]] = None
     bank_account_number: Optional[str] = None
+    hostel_sequence: int | None = None
     bank_ifsc_code: Optional[str] = None
     bank_name: Optional[str] = None
     category: Optional[int] = None
     bank_account_holder_name: Optional[str] = None
     upi_id: Optional[str] = None
     is_cash: Optional[bool] = True
+    is_agreement:Optional[bool] = False
+    rental_agreement:Optional[str] = None
+    police_verification:Optional[str] = None
     facilities: Optional[List[int]] = []  # List of facility IDs for creation and updates
 
 class HostelCreate(HostelBase):
@@ -172,6 +176,7 @@ class HostelUpdate(BaseSchema):
     zipcode: Optional[str] = None
     photos_urls: Optional[List[str]] = None
     bank_account_number: Optional[str] = None
+    hostel_sequence: int | None = None
     bank_ifsc_code: Optional[str] = None
     bank_name: Optional[str] = None
     category: Optional[int] = None
@@ -263,7 +268,7 @@ class HouseRuleBase(BaseSchema):
 
 class HouseRuleCreate(HouseRuleBase):
     pass
-
+ 
 class HouseRuleUpdate(BaseSchema):
     name: str
 

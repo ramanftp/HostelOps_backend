@@ -597,6 +597,20 @@ def create_manager(db: Session, manager_data: Dict[str, Any], owner_id: int) -> 
     db.refresh(new_manager)
     return new_manager
 
+def check_is_agrement(db: Session, hostel_id: int) -> bool:
+    """Check if hostel has rental agreement and police verification"""
+    from .models import Hostel
+    hostel = db.get(Hostel, hostel_id)
+    if not hostel:
+        raise ValueError("Hostel not found")
+    if not hostel.rental_agreement and not hostel.police_verification:
+        hostel.is_agreement = False
+    else:
+        hostel.is_agreement = True
+    db.commit()
+    db.refresh(hostel)
+
+
 import boto3
 from botocore.config import Config
 

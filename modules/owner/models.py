@@ -98,6 +98,7 @@ class Hostel(Base):
     email = Column(String(100), nullable=True)
     contact_number = Column(String(20), nullable=True)
     website = Column(String(100), nullable=True)
+    hostel_sequence = Column(Integer, nullable=False, default=1)
     # category = Column(String(20), nullable=True)  # women, men, coliving...
     category = Column(Integer, ForeignKey("categories.id"), nullable=True)
     is_cash = Column(Boolean, default=True)
@@ -105,6 +106,10 @@ class Hostel(Base):
     theme_color = Column(String(7), nullable=True, default="#3B82F6")  # Hex color code
     house_rules = Column(JSON, nullable=True)  # List of house rules
     policies = Column(JSON, nullable=True)  # List of policies
+    is_agreement = Column(Boolean, default=False)
+    rental_agreement = Column(String, nullable=True)
+    police_verification = Column(String, nullable=True)
+
 
     owner = relationship("Owner", back_populates="hostels")
     rooms = relationship("Room", back_populates="hostel", cascade="all, delete-orphan")
@@ -143,6 +148,7 @@ class Room(Base):
     facilities = Column(JSON, nullable=True)  # List of facilities in the room
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
+    price = Column(Integer, nullable=True, default=0)
 
     hostel = relationship("Hostel", back_populates="rooms")
     room_type_rel = relationship("RoomType", backref="rooms")

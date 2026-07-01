@@ -1,11 +1,12 @@
 from datetime import datetime, timedelta
 import logging
-from typing import List, Optional
+from typing import Annotated, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request, UploadFile, File, Body
 from fastapi.responses import HTMLResponse
+from pydantic import Json
 from requests import session
-from sqlalchemy import Transaction, and_, func
+from sqlalchemy import JSON, Transaction, and_, func
 from sqlalchemy.orm import Query, Session
 
 from core.config import settings
@@ -1028,12 +1029,401 @@ async def upload_tenant_photo(
     return {"url": url, "message": "Tenant photo uploaded successfully"}
 
 
+@router.get("/upload/hostel/{hostel_id}/agreement", tags=["Uploads Agreements"])
+async def get_agreements(
+    hostel_id: int,
+    db:Session = Depends(get_db),
+    current_owner: dict = Depends(get_current_owner),
+
+):
+    owner_id = current_owner["id"]
+    hostel = db.query(Hostel).filter(Hostel.id == hostel_id).first()
+
+
+    return {
+        "owner_id": owner_id,
+        "rental_agreement": hostel.rental_agreement,
+        "police_verification": hostel.police_verification
+    }
+
+
+@router.post("/upload/hostel/agreement", tags=["Uploads Agreements"])
+async def upload_agreements(
+    db:Session = Depends(get_db),
+    police_verification: Optional[UploadFile] = File(None),
+    rental_agreement: Optional[UploadFile] = File(None),
+    current_owner: dict = Depends(get_current_owner),
+):
+    """
+    Uploads Files and PDF/IMG
+    """
+
+    owner_id = current_owner["id"]
+
+    # Get next hostel sequence for this owner
+    last_sequence = (
+        db.query(func.max(Hostel.hostel_sequence))
+        .filter(Hostel.owner_id == owner_id)
+        .scalar()
+    )
+
+    next_sequence = (last_sequence or 0) + 1
+    rent_folder = f"owner/{owner_id}/hostel_{next_sequence}/rental_agreement"
+    police_verification_folder = f"owner/{owner_id}/hostel_{next_sequence}/police_verification"
+    rent_url = ""
+    police_url = ""
+    if rental_agreement :
+        try:
+            ext = os.path.splitext(rental_agreement.filename)[1]
+            file_key = f"{rent_folder}/{uuid.uuid4()}{ext}"
+            services.s3_client.upload_fileobj(
+                Fileobj=rental_agreement.file,
+                Bucket=services.BUCKET,
+                Key=file_key,
+                ExtraArgs={
+                    "ContentType": rental_agreement.content_type,
+                    "ACL": "public-read",
+                },
+            )
+            rent_url = f"{settings.S3_ENDPOINT_URL}/{services.BUCKET}/{file_key}"
+        except Exception as e:
+            raise HTTPException(status_code=403, detail="upload file failed")
+    if police_verification:
+        try:
+            ext = os.path.splitext(police_verification.filename)[1]
+            file_key = f"{police_verification_folder}/{uuid.uuid4()}{ext}"
+            services.s3_client.upload_fileobj(
+                Fileobj=police_verification.file,
+                Bucket=services.BUCKET,
+                Key=file_key,
+                ExtraArgs={
+                    "ContentType": police_verification.content_type,
+                    "ACL": "public-read",
+                },
+            )
+            police_url = f"{settings.S3_ENDPOINT_URL}/{services.BUCKET}/{file_key}"
+        except Exception as e:
+            raise HTTPException(status_code=403, detail="upload file failed")
+
+    return {
+        "message": " uploaded successfully.",
+        "police_verification": police_url,
+        "rental_agreement":rent_url
+    }
+
+@router.delete("/upload/hostel/{hostel_id}/rental_agreement", tags=["Uploads Agreements"])
+async def delete_rental_agreement(
+    hostel_id: int,
+    db:Session = Depends(get_db),
+    current_owner: dict = Depends(get_current_owner),
+):
+    """
+    Delete one photo.
+    """
+    hostel = db.query(Hostel).filter(Hostel.owner_id == current_owner['id']).filter(Hostel.hostel_id == hostel_id).first()
+
+    key = hostel.rental_agreement.split(f"{services.BUCKET}/")[1]
+
+    services.s3_client.delete_object(
+        Bucket=services.BUCKET,
+        Key=key,
+    )
+    if hostel:
+        hostel.rental_agreement = None
+    services.check_is_agrement(db, hostel_id)
+
+    return {
+        "message": "Rental agreement deleted successfully."
+    }
+
+
+@router.delete("/upload/hostel/{hostel_id}/police_verification", tags=["Uploads Agreements"])
+async def delete_police_verification(
+    hostel_id: int,
+    db:Session = Depends(get_db),
+    current_owner: dict = Depends(get_current_owner),
+):
+    """
+    Delete one photo.
+    """
+    hostel = db.query(Hostel).filter(Hostel.owner_id == current_owner['id']).filter(Hostel.hostel_id == hostel_id).first()
+
+    key = hostel.police_verification.split(f"{services.BUCKET}/")[1]
+
+    services.s3_client.delete_object(
+        Bucket=services.BUCKET,
+        Key=key,
+    )
+    if hostel:
+        hostel.police_verification = None
+
+    services.check_is_agrement(db, hostel_id)
+
+    return {
+        "message": "Police verification deleted successfully."
+    }
+
+
+#UPDATE - Upload More Photos
+
+#DELETE - Delete Single Photo
+from pydantic import BaseModel
+
+class DeletePhotoRequest(BaseModel):
+    photo_url: str
+
+
+@router.delete("/upload/hostel/{hostel_sequence}/photo", tags=["Uploads with owner_id"])
+async def delete_photo(
+    hostel_sequence: int,
+    request: DeletePhotoRequest,
+    current_owner: dict = Depends(get_current_owner),
+):
+    """
+    Delete one photo.
+    """
+
+    key = request.photo_url.split(f"{services.BUCKET}/")[1]
+
+    services.s3_client.delete_object(
+        Bucket=services.BUCKET,
+        Key=key,
+    )
+
+    return {
+        "message": "Photo deleted successfully."
+    }
+
+
+#DELETE - Delete All Photos
+
+@router.delete("/upload/hostel/{hostel_sequence}/photos", tags=["Uploads with owner_id"])
+async def delete_all_photos(
+    hostel_sequence: int,
+    current_owner: dict = Depends(get_current_owner),
+):
+    """
+    Delete all hostel photos.
+    """
+
+    owner_id = current_owner["id"]
+
+    folder = f"owner/{owner_id}/hostel_{hostel_sequence}/"
+
+    response = services.s3_client.list_objects_v2(
+        Bucket=services.BUCKET,
+        Prefix=folder,
+    )
+
+    if "Contents" not in response:
+        return {
+            "message": "No photos found."
+        }
+
+    objects = []
+
+    for obj in response["Contents"]:
+        objects.append({"Key": obj["Key"]})
+
+    services.s3_client.delete_objects(
+        Bucket=services.BUCKET,
+        Delete={"Objects": objects},
+    )
+
+    return {
+        "message": "All photos deleted successfully."
+    }
+
+
+
+@router.post("/upload/hostel/{hostel_sequence}/photos", tags=["Uploads with owner_id"])
+async def upload_more_photos(
+    hostel_sequence: int,
+    files: list[UploadFile] = File(...),
+    current_owner: dict = Depends(get_current_owner),
+):
+    """
+    Add more photos to existing hostel folder.
+    """
+
+    owner_id = current_owner["id"]
+
+    folder = f"owner/{owner_id}/hostel_{hostel_sequence}"
+
+    urls = []
+
+    for file in files:
+
+        ext = os.path.splitext(file.filename)[1]
+
+        file_key = f"{folder}/{uuid.uuid4()}{ext}"
+
+        services.s3_client.upload_fileobj(
+            Fileobj=file.file,
+            Bucket=services.BUCKET,
+            Key=file_key,
+            ExtraArgs={
+                "ContentType": file.content_type,
+                "ACL": "public-read",
+            },
+        )
+
+        urls.append(
+            f"{settings.S3_ENDPOINT_URL}/{services.BUCKET}/{file_key}"
+        )
+
+    return {
+        "message": "Photos uploaded successfully.",
+        "urls": urls,
+    }
+
+#READ - Get All Photos
+@router.get("/upload/hostel/{hostel_sequence}/photos", tags=["Uploads with owner_id"])
+async def get_hostel_photos(
+    hostel_sequence: int,
+    current_owner: dict = Depends(get_current_owner),
+):
+    """
+    Get all photos of a hostel.
+    """
+
+    # Logged in owner id
+    owner_id = current_owner["id"]
+
+    # Hostel folder
+    folder = f"owner/{owner_id}/hostel_{hostel_sequence}/"
+
+    # Get all files from S3 folder
+    response = services.s3_client.list_objects_v2(
+        Bucket=services.BUCKET,
+        Prefix=folder,
+    )
+
+    photos = []
+
+    # Folder exists
+    if "Contents" in response:
+
+        for obj in response["Contents"]:
+
+            photo_url = (
+                f"{settings.S3_ENDPOINT_URL}/"
+                f"{services.BUCKET}/"
+                f"{obj['Key']}"
+            )
+
+            photos.append(photo_url)
+
+    return {
+        "owner_id": owner_id,
+        "hostel_sequence": hostel_sequence,
+        "photos": photos,
+    }
+
+#CREATE - Upload New Hostel Photos
+@router.post("/upload/hostel/photos", tags=["Uploads with owner_id"])
+async def upload_hostel_photos(
+    files: list[UploadFile] = File(...),
+    current_owner: dict = Depends(get_current_owner),
+    db: Session = Depends(get_db),
+):
+    """
+    Upload hostel photos before hostel creation.
+    Creates folders like:
+        owner/{owner_id}/hostel_1/
+        owner/{owner_id}/hostel_2/
+        ...
+    """
+
+    owner_id = current_owner["id"]
+
+    # Get next hostel sequence for this owner
+    last_sequence = (
+        db.query(func.max(Hostel.hostel_sequence))
+        .filter(Hostel.owner_id == owner_id)
+        .scalar()
+    )
+
+    next_sequence = (last_sequence or 0) + 1
+    folder = f"owner/{owner_id}/hostel_{next_sequence}"
+
+    uploaded_urls = []
+
+    ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png"}
+
+    for file in files:
+        try:
+            ext = os.path.splitext(file.filename)[1].lower()
+
+            # Check file extension
+            if ext not in ALLOWED_EXTENSIONS:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{file.filename} is not a supported image. Only JPG, JPEG and PNG are allowed."
+                )
+
+            # Read file
+            contents = await file.read()
+
+            if not contents:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{file.filename} is empty."
+                )
+
+            # Reset pointer for upload
+            file.file.seek(0)
+
+            file_key = f"{folder}/{uuid.uuid4()}{ext}"
+
+            # Set correct Content-Type
+            if ext == ".png":
+                content_type = "image/png"
+            else:
+                content_type = "image/jpeg"
+
+            services.s3_client.upload_fileobj(
+                Fileobj=file.file,
+                Bucket=services.BUCKET,
+                Key=file_key,
+                ExtraArgs={
+                    "ContentType": content_type,
+                    "ACL": "public-read",
+                },
+            )
+
+            file_url = (
+                f"{settings.S3_ENDPOINT_URL}/{services.BUCKET}/{file_key}"
+            )
+
+            uploaded_urls.append(file_url)
+
+        except HTTPException:
+            raise
+
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to upload {file.filename}: {str(e)}",
+            )
+
+    return {
+        "owner_id": owner_id,
+        "hostel_sequence": next_sequence,
+        "folder": folder,
+        "urls": uploaded_urls,
+        "message": f"{len(uploaded_urls)} photos uploaded successfully."
+    }
+
+
+
+
 
 
 @router.post("/upload/hostel/{hostel_id}/photos", tags=["Uploads"])
 async def upload_hostel_photos(
     hostel_id: int,
-    files: List[UploadFile] = File(...),
+    files: list[UploadFile] = File(...) ,
     current_owner: dict = Depends(get_current_owner),
     db: Session = Depends(get_db)
 ):
@@ -1185,6 +1575,9 @@ def create_facility(
     db.refresh(db_facility)
 
     return db_facility
+
+
+
 @router.delete("/facilities/{facility_id}", tags=["Facilities"])
 def delete_facility(
     facility_id: str,
